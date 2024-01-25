@@ -9,15 +9,14 @@ class Settings:
         if ext.lower() != ".ini":
             raise ValueError("Invalid settings file given")
         self.data_directory = "/data"
-        # SDB - Struct Database file
-        self.database_file = "database.sdb"
         self.auto_catalogue = True
         
-        default_settings = f"{self.data_directory}\n{self.database_file}\n{str(int(self.auto_catalogue))}"
+        default_settings = f"{self.data_directory}\n{str(int(self.auto_catalogue))}"
         if not os.path.exists(file):
             write(file, default_settings)
         self._load_settings(file)
 
+    # TODO: Make this cleaner
     def _load_settings(self, file):
         with open(file, 'r') as f:
             for i in range(len(f)):
@@ -30,10 +29,5 @@ class Settings:
                         else:
                             raise ValueError("Invalid data directory")
                     if i == 1:
-                        if os.path.exists(line):
-                            self.database_file = line
-                        else:
-                            raise ValueError("Invalid database file")
-                    if i == 2:
                         if int(line) != 1:
                             self.auto_catalogue = False

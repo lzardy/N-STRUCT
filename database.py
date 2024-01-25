@@ -39,7 +39,7 @@ class StructDatabase:
         # Contains the raw database byte data
         self.data = read_bytes(file_path)
         # Contains StructPointers, allows for quick access to StructData/StructBase locations in data
-        self.header = []
+        self.ptrs = []
         # Contains StructDatas and StructBases
         self.structs = []
 
@@ -57,15 +57,21 @@ class DBCMD(IntFlag):
 
 # Container and handler which gets and sets data in the Struct Database File
 class Database():
-    def __init__(self, path, file_path):
+    def __init__(self, path):
         self.working_dir = path
-        self.file_path = file_path
+        # Struct Database file containing all the structures
+        self.sdb_path = os.path.join(self.working_dir, 'database.sdb')
+        # Pointers file containing location data for individual structures, relevant for looking up stuff from the database file (quickly).
+        self.ptrs_path = os.path.join(self.working_dir, 'pointers.sdb')
         
         # Init empty database
-        if not os.path.exists(self.file_path):
-            write_bytes(self.file_path)
+        if not os.path.exists(self.sdb_path):
+            write_bytes(self.sdb_path)
+        
+        if not os.path.exists(self.ptrs_path):
+            write_bytes(self.ptrs_path)
             
-        self.struct_db = StructDatabase(self.file_path)
+        self.struct_db = StructDatabase(self.working_dir, self.sdb_path)
         
     CMDARGS = {
         DBCMD.GET_NEW_ID: (0, []),
@@ -77,6 +83,7 @@ class Database():
     }
 
     # Gets and reserves the next ID for a new struct
+    # Essentially appends a new struct to the end of the database file
     def __getNewID__(self):
         pass
 

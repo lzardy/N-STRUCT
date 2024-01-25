@@ -18,7 +18,6 @@ class Manager:
        self.settings = Settings()
        
        data_dir = os.path.join(os.getcwd(), self.settings.data_directory)
-       db_file_path = os.path.join(data_dir, self.settings.database_file)
-       self.database = Database(data_dir, db_file_path)
+       self.database = Database(data_dir)
        
        self.catalogue = Catalogue(self.database, self.settings.auto_catalogue)
