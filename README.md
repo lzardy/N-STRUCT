@@ -16,7 +16,10 @@ Extra features provide QOL to users. These could end up being customizable addon
 - **Catalogue**: Automation which minimizes redudancy in the Database. Refer to the Cataloguing section below for more information.
 
 ### Cataloguing
-Newly stored data is judged for redundancy by structure and content. If the content of the data does not already exist in the database, meaning there are no existing structures which can be combined to represent the content, it is assigned a new structure ID. Otherwise, the content will be replaced by a set of structure IDs in a tree-like fashion. Some structures contain other structures, some may only contain data, but all structures in the database correspond to an ID.
+Newly stored data is judged for redundancy by structure and content. If the content of the data does not already exist in the database, meaning there are no existing structures which can be combined to represent the content, it is appended to the database and assigned a new structure ID (ID is just the index in the database). Otherwise, it is still appended and given a new structure ID, but the content will then be replaced by a set of existing structure IDs (sub-structures). Some structures contain sub-structures, some may only contain data, but all structures in the database correspond to an ID.
+
+#### **KEY NOTE**:
+Structures comprised of sub-structures only show as being comprised of the highest level existing structures, rather than the full hierarchy of sub-structures from highest to lowest complexity. The full tree of sub-structures can only be known by referencing them individually. This too, is meant to save on resources, specifically for cataloguing new structures being added to the database.
 
 ## Extras
 - **Error Handling**: The tool has built-in error handling to catch and report errors during execution.
