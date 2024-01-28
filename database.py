@@ -1,15 +1,36 @@
 from enum import IntFlag
 import os
 from error_handler import handle_errors
-from file_io import read_bytes, write_bytes
+from file_io import read_bits, write_bits, read_bytes, write_bytes
+
+# TODO: Utilize ZStandard Compression
 
 from enum import Enum
 
 # Struct types
 class STYPE(Enum):
+    COUNT = 0
     BASE = 1
     DATA = 2
     BLUEPRINT = 3
+
+# TODO: Implement an approach for Lempel-Ziv-Welch Compression
+
+# Represents a struct repeated a certain number of times
+# A class-based approach to Run-Length Encoding compression
+class StructCount:
+    def __init__(self, id=None, refID=None, count=0, size=None, struct_type=STYPE.COUNT):
+        self.id = id
+        self.refID = refID
+        self.count = count
+        self.type = struct_type
+        # TODO: Add self.size, which grabs the len() of the data for the StructData with this ID
+    
+    def add(self, val):
+        self.count += val
+    
+    def subtract(self, val):
+        self.count -= val
 
 # Details what other structs make up this struct
 class StructBase:
@@ -21,13 +42,19 @@ class StructBase:
     def add_substruct(self, substruct):
         self.substructs.append(substruct)
 
+# TODO: Represents a struct through a data operation between some number of structs
+# class StructDelta:
+
 # Details the raw byte data that represents a struct and its substructs
+# Should only be kept in memory when actively being used
 class StructData(StructBase):
     def __init__(self, id=None, substructs=[], data=[], struct_type=STYPE.DATA):
         super().__init__(id, substructs, struct_type)
         self.data = data
+        self.size = len(self.data)
 
 # Points to a StructData for quick access to StructData/StructBase locations in byte data
+# Kept in memory while idle
 class StructPointer:
     def __init__(self, id, index):
         self.structID = id
@@ -40,7 +67,7 @@ class StructDatabase:
         self.data = read_bytes(file_path)
         # Contains StructPointers, allows for quick access to StructData/StructBase locations in data
         self.ptrs = []
-        # Contains StructDatas and StructBases
+        # Contains StructBases/StructCounts
         self.structs = []
 
 # Database commands
@@ -101,6 +128,7 @@ class Database():
     
     # Assigns data to a given ID
     def __setData__(self, id, data):
+        # TODO: Use write_bits to 
         pass
     
     # Assigns an ID to the given data

@@ -1,4 +1,4 @@
-from file_io import read_bytes, write_bytes
+from file_io import read_bits, write_bits
 import os
 import sys
 from settings import Settings
@@ -17,7 +17,11 @@ from database import Database
 class Manager:
     def __init__(self):
         if len(sys.argv) > 1:
-            file_path = os.path.join(os.getcwd(), sys.argv[1])
+            # Relative to working directory or not
+            if sys.argv[2] == "true":
+                file_path = os.path.join(os.getcwd(), sys.argv[1])
+            else:
+                file_path = sys.argv[1]
         else:
             raise ValueError("No file path provided")
         
@@ -28,13 +32,12 @@ class Manager:
        
         self.catalog = Catalog(self.database, self.settings.auto_catalog)
         
-        file_data = read_bytes(file_path)
-        print(file_data)
+        file_data = read_bits(file_path)
         blueprint = self.catalog.try_catalog(file_data)
 
         # Save blueprint to file
-        print("saving blueprint: ", os.path.join(data_dir, "blueprint.json"))
-        write_bytes(os.path.join(data_dir, "blueprint.json"), blueprint.data)
+        print("Saving blueprint to: ", os.path.join(data_dir, "blueprint"))
+        write_bits(os.path.join(data_dir, "blueprint"), blueprint.data)
 
 if __name__ == "__main__":
     Manager()
