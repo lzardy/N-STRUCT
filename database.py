@@ -13,7 +13,7 @@ class STYPE(Enum):
 
 # Details what other structs make up this struct
 class StructBase:
-    def __init__(self, id, substructs=[], struct_type=STYPE.BASE):
+    def __init__(self, id=None, substructs=[], struct_type=STYPE.BASE):
         self.id = id
         self.substructs = substructs
         self.type = struct_type
@@ -23,7 +23,7 @@ class StructBase:
 
 # Details the raw byte data that represents a struct and its substructs
 class StructData(StructBase):
-    def __init__(self, id, substructs, data, struct_type=STYPE.DATA):
+    def __init__(self, id=None, substructs=[], data=[], struct_type=STYPE.DATA):
         super().__init__(id, substructs, struct_type)
         self.data = data
 
@@ -71,7 +71,7 @@ class Database():
         if not os.path.exists(self.ptrs_path):
             write_bytes(self.ptrs_path)
             
-        self.struct_db = StructDatabase(self.working_dir, self.sdb_path)
+        self.struct_db = StructDatabase(self.sdb_path)
         
     CMDARGS = {
         DBCMD.GET_NEW_ID: (0, []),
