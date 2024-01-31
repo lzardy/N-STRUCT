@@ -1,46 +1,34 @@
-from enum import IntFlag
+from enum import Enum, IntFlag
 import os
+from re import S
 from error_handler import handle_errors
 from file_io import read_bits, write_bits, read_bytes, write_bytes
 
 # TODO: Utilize ZStandard Compression
 
-from enum import Enum
-
 # Struct types
 class STYPE(Enum):
-    COUNT = 0
-    BASE = 1
-    DATA = 2
+    BASE = 0
+    DATA = 1
+    PRIMITIVE = 2
     BLUEPRINT = 3
 
 # TODO: Implement an approach for Lempel-Ziv-Welch Compression
 
-# Represents a struct repeated a certain number of times
-# A class-based approach to Run-Length Encoding compression
-class StructCount:
-    def __init__(self, id=None, refID=None, count=0, size=None, struct_type=STYPE.COUNT):
-        self.id = id
-        self.refID = refID
-        self.count = count
-        self.type = struct_type
-        # TODO: Add self.size, which grabs the len() of the data for the StructData with this ID
-    
-    def add(self, val):
-        self.count += val
-    
-    def subtract(self, val):
-        self.count -= val
-
-# Details what other structs make up this struct
+# Details what other structs make up a struct
 class StructBase:
     def __init__(self, id=None, substructs=[], struct_type=STYPE.BASE):
         self.id = id
         self.substructs = substructs
         self.type = struct_type
     
+    # Adds a substruct to this struct
     def add_substruct(self, substruct):
         self.substructs.append(substruct)
+    
+    # Returns a copy of this struct
+    def copy(self):
+        return StructBase(self.id, self.substructs.copy(), self.type)
 
 # TODO: Represents a struct through a data operation between some number of structs
 # class StructDelta:
@@ -48,11 +36,45 @@ class StructBase:
 # Details the raw byte data that represents a struct and its substructs
 # Should only be kept in memory when actively being used
 class StructData(StructBase):
-    def __init__(self, id=None, substructs=[], data=[], struct_type=STYPE.DATA):
+    def __init__(self, id=None, substructs=[], data=[], num_values=1, struct_type=STYPE.DATA):
         super().__init__(id, substructs, struct_type)
         self.data = data
-        self.size = len(self.data)
+        # Number of possible values this struct can represent (from 0)
+        self.num_values = num_values
+    
+    # Returns a list of all possible values this struct can represent
+    def get_values(self):
+        values = []
+        for value in range(self.num_values):
+            values.append(value)
+    
+    def copy(self):
+        return StructData(self.id, self.substructs.copy(), self.data.copy(), self.num_values, self.type)
 
+# A unique struct built using other structs
+# Ex: Byte structs are 8 bits
+class StructPrimitive(StructData):
+    def __init__(self, id=None, substructs=[], data=[], base_struct=None, max_size=1, step_size=0, num_values=1, struct_type=STYPE.PRIMITIVE):
+        super().__init__(id, substructs, data, num_values, struct_type)
+        self.base_struct = base_struct
+        self.max_size = max_size
+        self.step_size = step_size
+        self.max_value = num_values ** self.max_size
+        if self.base_struct:
+            self.max_value = self.num_values * (self.base_struct.num_values ** self.max_size)
+            self.fill_substructs()
+    
+    # Calculates the maximum size the data of this struct can be
+    def get_total_size(self):
+        if self.base_struct:
+            return self.max_size * self.base_struct.get_total_size()
+        return self.max_size
+
+    # Fills substructs array with copies of base_struct
+    def fill_substructs(self):
+        for i in range(self.max_value):
+            self.substructs.append(self.base_struct.copy())
+        
 # Points to a StructData for quick access to StructData/StructBase locations in byte data
 # Kept in memory while idle
 class StructPointer:
@@ -69,6 +91,16 @@ class StructDatabase:
         self.ptrs = []
         # Contains StructBases/StructCounts
         self.structs = []
+        
+        self.default_fill()
+    
+    # Fills structs array with default structures (bit, byte, integer, float, etc.)
+    def default_fill(self):
+        # Bits (0 or 1)
+        bit = self.structs.append(StructPrimitive(0, num_values=2))
+        # Bytes (0-255)
+        byte = self.structs.append(StructPrimitive(1, base_struct=bit, max_size=8))
+        
 
 # Database commands
 class DBCMD(IntFlag):
@@ -91,7 +123,7 @@ class Database():
         # Pointers file containing location data for individual structures, relevant for looking up stuff from the database file (quickly).
         self.ptrs_path = os.path.join(self.working_dir, 'pointers.sdb')
         
-        # Init empty database
+        # Init database
         if not os.path.exists(self.sdb_path):
             write_bytes(self.sdb_path)
         
@@ -112,28 +144,28 @@ class Database():
     # Gets and reserves the next ID for a new struct
     # Essentially appends a new struct to the end of the database file
     def __getNewID__(self):
-        pass
+        new_id = len(self.struct_db.structs)
+        self.struct_db.structs.append(None)
+        
+        return new_id
 
     # Retrieve data by ID
     def __getData__(self, id):
-        pass
+        return self.struct_db.structs[id]
 
     # Retrieve ID by data
     def __getID__(self, data):
-        pass
+        return self.struct_db.structs.index(data)
 
     # Retrieve substruct IDs in given struct
     def __getSubIDs__(self, id):
-        pass
+        return self.struct_db.structs[id].substructs
     
     # Assigns data to a given ID
     def __setData__(self, id, data):
-        # TODO: Use write_bits to 
-        pass
-    
-    # Assigns an ID to the given data
-    def __setID__(self, data, id):
-        pass
+        struct = self.struct_db.structs[id]
+        if struct.type != STYPE.DATA:
+            self.struct_db.structs[id] = StructData(id, struct.substructs, data)
     
     def __checkCMD__(self, cmd, args):
         if cmd not in self.CMDARGS:
