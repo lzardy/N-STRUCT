@@ -17,9 +17,12 @@ class STYPE(Enum):
 
 # Details what other structs make up a struct
 class StructBase:
-    def __init__(self, id=None, substructs=[], struct_type=STYPE.BASE):
+    def __init__(self, id=None, substructs=None, struct_type=STYPE.BASE):
         self.id = id
-        self.substructs = substructs
+        if substructs:
+            self.substructs = substructs
+        else:
+            self.substructs = []
         self.type = struct_type
     
     # Adds a substruct to this struct
@@ -30,15 +33,21 @@ class StructBase:
     def copy(self):
         return StructBase(self.id, self.substructs.copy(), self.type)
 
+    def get_data(self):
+        return [substruct.get_data() for substruct in self.substructs]
+
 # TODO: Represents a struct through a data operation between some number of structs
 # class StructDelta:
 
 # Details the raw byte data that represents a struct and its substructs
 # Should only be kept in memory when actively being used
 class StructData(StructBase):
-    def __init__(self, id=None, substructs=[], data=[], num_values=1, struct_type=STYPE.DATA):
+    def __init__(self, id=None, substructs=None, data=None, num_values=1, struct_type=STYPE.DATA):
         super().__init__(id, substructs, struct_type)
-        self.data = data
+        if data:
+            self.data = data
+        else:
+            self.data = []
         # Number of possible values this struct can represent (from 0)
         self.num_values = num_values
     
@@ -50,30 +59,23 @@ class StructData(StructBase):
     
     def copy(self):
         return StructData(self.id, self.substructs.copy(), self.data.copy(), self.num_values, self.type)
+    
+    def get_data(self):
+        return self.data
 
 # A unique struct built using other structs
 # Ex: Byte structs are 8 bits
 class StructPrimitive(StructData):
-    def __init__(self, id=None, substructs=[], data=[], base_struct=None, max_size=1, step_size=0, num_values=1, struct_type=STYPE.PRIMITIVE):
+    def __init__(self, id=None, substructs=None, data=None, base_struct=None, max_size=1, num_values=1, struct_type=STYPE.PRIMITIVE):
         super().__init__(id, substructs, data, num_values, struct_type)
         self.base_struct = base_struct
         self.max_size = max_size
-        self.step_size = step_size
-        self.max_value = num_values ** self.max_size
-        if self.base_struct:
-            self.max_value = self.num_values * (self.base_struct.num_values ** self.max_size)
-            self.fill_substructs()
     
     # Calculates the maximum size the data of this struct can be
     def get_total_size(self):
         if self.base_struct:
             return self.max_size * self.base_struct.get_total_size()
         return self.max_size
-
-    # Fills substructs array with copies of base_struct
-    def fill_substructs(self):
-        for i in range(self.max_value):
-            self.substructs.append(self.base_struct.copy())
         
 # Points to a StructData for quick access to StructData/StructBase locations in byte data
 # Kept in memory while idle
@@ -90,6 +92,7 @@ class StructDatabase:
         # Contains StructPointers, allows for quick access to StructData/StructBase locations in data
         self.ptrs = []
         # Contains StructBases/StructCounts
+        # TODO: Implement queuing when adding structs and a temporary struct cache for commonly used structs during runtime and cataloging
         self.structs = []
         
         self.default_fill()
@@ -97,10 +100,15 @@ class StructDatabase:
     # Fills structs array with default structures (bit, byte, integer, float, etc.)
     def default_fill(self):
         # Bits (0 or 1)
-        bit = self.structs.append(StructPrimitive(0, num_values=2))
+        bit = StructPrimitive(0, num_values=2)
         # Bytes (0-255)
-        byte = self.structs.append(StructPrimitive(1, base_struct=bit, max_size=8))
-        
+        byte = StructPrimitive(1, base_struct=bit, max_size=8)
+        # Integers/Characters (0-2^32-1), ASCII is 1 byte, unicode is 1-4 bytes
+        numeric = StructPrimitive(2, base_struct=byte, max_size=4)
+        # Floats (0-2^128-1), 8-bit floats are real I swear!
+        floating_point = StructPrimitive(3, base_struct=byte, max_size=16)
+        # Arrays are a dynamic container
+        arrays = StructBase(4)
 
 # Database commands
 class DBCMD(IntFlag):
