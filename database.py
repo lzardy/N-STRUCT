@@ -33,9 +33,6 @@ class StructBase:
     def copy(self):
         return StructBase(self.id, self.substructs.copy(), self.type)
 
-    def get_data(self):
-        return [substruct.get_data() for substruct in self.substructs]
-
 # TODO: Represents a struct through a data operation between some number of structs
 # class StructDelta:
 
@@ -57,11 +54,9 @@ class StructData(StructBase):
         for value in range(self.num_values):
             values.append(value)
     
+    # Returns a copy of this struct
     def copy(self):
         return StructData(self.id, self.substructs.copy(), self.data.copy(), self.num_values, self.type)
-    
-    def get_data(self):
-        return self.data
 
 # A unique struct built using other structs
 # Ex: Byte structs are 8 bits
@@ -99,28 +94,59 @@ class StructDatabase:
     
     # Fills structs array with default structures (bit, byte, integer, float, etc.)
     def default_fill(self):
+        # TODO: Verify if we want to generate all possible values for each struct
         # Bits (0 or 1)
         bit = StructPrimitive(0, num_values=2)
+        self.structs.append(bit)
         # Bytes (0-255)
         byte = StructPrimitive(1, base_struct=bit, max_size=8)
+        self.structs.append(byte)
         # Integers/Characters (0-2^32-1), ASCII is 1 byte, unicode is 1-4 bytes
         numeric = StructPrimitive(2, base_struct=byte, max_size=4)
+        self.structs.append(numeric)
         # Floats (0-2^128-1), 8-bit floats are real I swear!
         floating_point = StructPrimitive(3, base_struct=byte, max_size=16)
+        self.structs.append(floating_point)
         # Arrays are a dynamic container
-        arrays = StructBase(4)
+        self.structs.append(StructBase(4))
+    
+    # Gets the data of a struct by ID
+    def get_data(self, id):
+        try:
+            struct = self.structs[id]
+            if struct.type == STYPE.DATA:
+                return struct.data
+            else:
+                data = []
+                for substruct in struct.substructs:
+                    data.append(self.get_data(substruct))
+                return data
+        except:
+            return []
+    
+    # Gets the data of a struct by struct
+    def get_data(self, struct):
+        if struct.type == STYPE.DATA:
+            return struct.data
+        else:
+            data = []
+            for substruct in struct.substructs:
+                data.append(self.get_data(substruct))
+            return data
 
 # Database commands
 class DBCMD(IntFlag):
     # Getters
     GET_NEW_ID = 1 << 0
     GET_DATA = 1 << 1
-    GET_ID = 1 << 2
-    GET_SUB_IDS = 1 << 3
+    GET_STRUCT_DATA = 1 << 2
+    GET_ID = 1 << 3
+    GET_SUB_IDS = 1 << 4
+    GET_STRUCTS = 1 << 5
     
     # Setters
-    SET_DATA = 1 << 4
-    SET_ID = 1 << 5
+    SET_DATA = 1 << 6
+    ADD_STRUCT = 1 << 7
 
 # Container and handler which gets and sets data in the Struct Database File
 class Database():
@@ -143,10 +169,12 @@ class Database():
     CMDARGS = {
         DBCMD.GET_NEW_ID: (0, []),
         DBCMD.GET_DATA: (1, [int]),
+        DBCMD.GET_STRUCT_DATA: (1, [object]),
         DBCMD.GET_ID: (1, [object]),
         DBCMD.GET_SUB_IDS: (1, [int]),
+        DBCMD.GET_STRUCTS: (0, []),
         DBCMD.SET_DATA: (2, [int, object]),
-        DBCMD.SET_ID: (2, [object, int]),
+        DBCMD.ADD_STRUCT: (2, [object]),
     }
 
     # Gets and reserves the next ID for a new struct
@@ -159,11 +187,18 @@ class Database():
 
     # Retrieve data by ID
     def __getData__(self, id):
-        return self.struct_db.structs[id]
+        return self.struct_db.get_data(id)
+    
+    # Retrieve data by struct
+    def __getStructData__(self, struct):
+        return self.struct_db.get_data(struct)
 
     # Retrieve ID by data
     def __getID__(self, data):
-        return self.struct_db.structs.index(data)
+        try:
+            return self.struct_db.structs.index(data)
+        except:
+            return None
 
     # Retrieve substruct IDs in given struct
     def __getSubIDs__(self, id):
@@ -175,6 +210,11 @@ class Database():
         if struct.type != STYPE.DATA:
             self.struct_db.structs[id] = StructData(id, struct.substructs, data)
     
+    # Adds a struct to the database
+    def __addStruct__(self, struct):
+        self.struct_db.structs.append(struct)
+        
+    # Checks if command + arguments are valid
     def __checkCMD__(self, cmd, args):
         if cmd not in self.CMDARGS:
             raise ValueError('Invalid command')
@@ -186,20 +226,25 @@ class Database():
         for arg, expected_type in zip(args, expected_types):
             if not isinstance(arg, expected_type):
                 raise TypeError(f'Argument {arg} does not match expected type {expected_type.__name__}')
-        
+    
     @handle_errors
+    # Handles database commands
     def query(self, cmd, *args):
         self.__checkCMD__(cmd, args)
         
         if cmd == DBCMD.GET_NEW_ID:
-            return self.__getNewID__(self)
+            return self.__getNewID__()
         elif cmd == DBCMD.GET_DATA:
-            return self.__getData__(self, args[0])
+            return self.__getData__(args[0])
+        elif cmd == DBCMD.GET_STRUCT_DATA:
+            return self.__getStructData__(args[0])
         elif cmd == DBCMD.GET_ID:
-            return self.__getID__(self, args[0])
+            return self.__getID__(args[0])
         elif cmd == DBCMD.GET_SUB_IDS:
-            return self.__getSubIDs__(self, args[0])
+            return self.__getSubIDs__(args[0])
+        elif cmd == DBCMD.GET_STRUCTS:
+            return self.struct_db.structs
         elif cmd == DBCMD.SET_DATA:
-            return self.__setData__(self, args[0], args[1])
-        elif cmd == DBCMD.SET_ID:
-            return self.__setID__(self, args[0], args[1])
+            return self.__setData__(args[0], args[1])
+        elif cmd == DBCMD.ADD_STRUCT:
+            return self.__addStruct__(args[0])

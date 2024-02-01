@@ -1,29 +1,26 @@
-from database import StructBase, StructData
+from unittest.util import strclass
+from database import StructBase, DBCMD, STYPE
 
 class Catalog:
     def __init__(self, database, auto=False):
         self.database = database
+        # TODO: Implement by checking file system for new files in data directory
         self.auto = auto
 
     def try_catalog(self, data):
-        new_struct = StructData()
-        if len(data) == 0:
-            # Empty StructBase, id = None
-            return new_struct
+        blueprint = StructBase(struct_type=STYPE.BLUEPRINT)
         
-        new_struct.data = data
+        # Check if data exists in database
+        struct_id = self.database.query(DBCMD.GET_ID, data)
+        if struct_id:
+            # Data exists in database
+            blueprint.add_substruct(struct_id)
+        else:
+            # TODO: Implement struct detection/data overlap checking
+            return []
         
-        return new_struct
-    
-    def get_struct_id(self, data):
-        return
+        return blueprint.substructs
 
-    def replace_with_tree(self, data):
-        return
-
-    def save_unseen_content(self, data):
-        return
-    
     def _segment_data(self, data, num_bits):
         # Convert data to binary
         binary_data = bin(int.from_bytes(data, 'big'))[2:]

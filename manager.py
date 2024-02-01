@@ -37,7 +37,7 @@ class Manager:
 
         # Save blueprint to file
         print("Saving blueprint to: ", os.path.join(data_dir, "blueprint"))
-        write_bits(os.path.join(data_dir, "blueprint"), blueprint.data)
+        write_bits(os.path.join(data_dir, "blueprint"), blueprint)
 
 if __name__ == "__main__":
     Manager()
