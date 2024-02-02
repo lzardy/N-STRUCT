@@ -22,6 +22,7 @@ Newly stored data is judged for redundancy by structure and content. If the cont
 Structures comprised of sub-structures only show as being comprised of the highest level existing structures, rather than the full hierarchy of sub-structures from highest to lowest complexity. The full tree of sub-structures can only be known by referencing them individually. This too, is meant to save on resources, specifically for cataloguing new structures being added to the database.
 
 ## Extras
+- **Manager**: The tool provides a system for users to interact with core systems.
 - **Error Handling**: The tool has built-in error handling to catch and report errors during execution.
 - **Settings**: The tool can load and save settings from an .ini file.
 - **Operations**: The tool can perform operations on data in memory. Currently supported operations include refining, simplifying, and converting data to other types.
@@ -34,7 +35,7 @@ pip install -r requirements.txt
 ```
 2. Run
 ```
-python manager.py <file path>
+python manager.py <file path> <auto catalog>
 ```
 
 For more detailed usage instructions, please refer to the individual documentation for each class.
