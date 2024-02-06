@@ -1,31 +1,61 @@
 # Description
-N-STRUCT is a Python-based database tool automating the minimization of redudancy for data structures.
+N-STRUCT is a Python-based database tool which can identify and minimize redundancy in data.
 
-In simpler terms, any object that exists, we treat as a collection of less complex objects. We do this only by reference, thereby saving on resource usage when using the complex objects. All objects are synonymous with blueprints, things that describe how to build the object piece by piece.
+In more specific terms, we find how bits and bytes relate in some segment of data, then perform abstraction to represent the segment as a single structure. By saving these abstractions in a database, we can represent the original data (or any similar data) by references instead of bits and bytes, saving resources.
+
+This project is the foundation for a suite of tools, using the abstractions saved here to more easily act on the higher level features of data. In other words, it is the stage of learning where knowledge is crystalized.
 
 # Features
-This section is separated into two sections: **Core** and **Extras**. Each section is just a set of features N-STRUCT offers.
 
-Core features are required for N-STRUCT to be a functional tool, like how a computer is required to run computer programs.
-
-Extra features provide QOL to users. These could end up being customizable addons in the future, time will tell.
+## Core
+These features are required, and together they accomplish the main goal.
 
 ## Core
 - **File I/O**: Allows reading and writing string and byte data to disk.
-- **Database**: Utilizes a structured database system to store and manage data on the disk. All of the information in the database is contained in a single Structure Database File (SDB).
-- **Catalog**: Automation which minimizes redudancy in the Database. Refer to the Cataloguing section below for more information.
-
-### Cataloguing
-Newly stored data is judged for redundancy by structure and content. If the content of the data does not already exist in the database, meaning there are no existing structures which can be combined to represent the content, it is appended to the database and assigned a new structure ID (ID is just the index in the database). Otherwise, it is still appended and given a new structure ID, but the content will then be replaced by a set of existing structure IDs (sub-structures). Structures can contain sub-structures, structures may only contain data, but all structures in the database must correspond to an ID.
-
-#### **KEY NOTE**:
-Structures comprised of sub-structures only show as being comprised of the highest level existing structures, rather than the full hierarchy of sub-structures from highest to lowest complexity. The full tree of sub-structures can only be known by referencing them individually. This too, is meant to save on resources, specifically for cataloguing new structures being added to the database.
+- **Database**: Utilizes a structured database system to store and manage data on the disk. The information in the database is saved as Structure Database Files (SDB).
+- **Catalog**: . Refer to the Cataloguing section below for more information.
 
 ## Extras
-- **Manager**: The tool provides a system for users to interact with core systems.
-- **Error Handling**: The tool has built-in error handling to catch and report errors during execution.
-- **Settings**: The tool can load and save settings from an .ini file.
-- **Operations**: The tool can perform operations on data in memory. Currently supported operations include refining, simplifying, and converting data to other types.
+These features provide QOL to users. These could end up being customizable addons in the future, time will tell.
+
+### Cataloguing
+Data runs through three processes before being sent to the database:
+1. Judging
+2. Abstracting
+3. Blueprinting
+
+#### **Judging**
+Here, the data gets compared to the database.
+- If it matches 1:1 to a blueprint in the database, we skip to **Blueprinting**
+- Otherwise, we try replacing segments in the data with matching structures in the database
+- Any data left over, means we move to **Abstracting**
+
+#### **Abstracting** (WIP)
+This is the current **Work in Progress** phase of the project, and what is stated here is fairly contentious and could change at any time.
+
+Currently, the idea is to construct a map of relationships in the data. Each data point (bit/byte/segment/etc) has a relationship with every other data point in an entire dataset.
+
+To do so, we need a rigorously defined set of parameters which define what a "relationship" is.
+1. **Appearance** - How a data point "looks", bit/byte/sequence/etc, what it is composed of
+2. **Frequency** - How often a data point appears with respect to some dataset
+3. **Relativity** - Where the data point is with respect to other data points, including data points with the same appearance
+4. **Others?** - More than likely, these will all be contextual
+
+The first three parameters are simple and general and (as of writing) not enough time has been spent to find other obviously simple parameters (yes, this is a human gradient descent prior).
+
+
+#### **Blueprinting**
+The final data abstractions are packaged into a single file called a "Blueprint". The previous steps replaced individual bits and bytes with known concepts, relations, and patterns. Thus, when those concepts are linked together, they form a single coherent and unique object.
+
+We then save the object to the database, and now we can use what we've learned from the catalogued file, to catalog other files.
+
+## Extras
+#### **Error Handling**
+The tool has built-in error handling to catch and report errors during execution.
+#### **Settings**
+The tool can load and save settings from an .ini file.
+#### **Operations**
+The tool can perform operations on data in memory. Currently supported operations include refining, simplifying, and converting data to other types.
 
 ## Usage
 To use N-STRUCT, you can run these commands:
@@ -35,7 +65,7 @@ pip install -r requirements.txt
 ```
 2. Run
 ```
-python manager.py <file path> <auto catalog>
+python manager.py <file path>
 ```
 
-For more detailed usage instructions, please refer to the individual documentation for each class.
+For more detailed usage instructions (developers), please refer to the individual documentation for each class.

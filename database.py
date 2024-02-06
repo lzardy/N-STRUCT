@@ -107,8 +107,8 @@ class StructDatabase:
         # Floats (0-2^128-1), 8-bit floats are real I swear!
         floating_point = StructPrimitive(3, base_struct=byte, max_size=16)
         self.structs.append(floating_point)
-        # Arrays are a dynamic container
-        self.structs.append(StructBase(4))
+        # Arrays are a dynamic container and are contextual
+        # So, we leave them for the catalog to declare
     
     # Gets the data of a struct by ID
     def get_data(self, id):

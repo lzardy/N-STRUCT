@@ -10,7 +10,7 @@ def read_bits(file_path):
         byte = file.read(1)
         while byte:
             for i in range(BYTE_BITS):
-                data.append(bool((ord(byte) >> (7 - i)) & 1))
+                data.append((ord(byte) >> (7 - i) & 1))
             byte = file.read(1)
     return data
 
