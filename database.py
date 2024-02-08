@@ -11,7 +11,8 @@ class STYPE(Enum):
     BASE = 0
     DATA = 1
     PRIMITIVE = 2
-    BLUEPRINT = 3
+    CONTEXTUAL = 3
+    BLUEPRINT = 4
 
 # TODO: Implement an approach for Lempel-Ziv-Welch Compression
 
