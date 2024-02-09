@@ -5,9 +5,9 @@ from database import StructBase, StructPrimitive, DBCMD, STYPE
 
 # A struct with relations to other structures (in context)
 class StructContextual(StructPrimitive):
-    def __init__(self, id=None, substructs=None, data=None, base_struct=None, max_size=1, num_values=1, context=[], struct_type=STYPE.CONTEXTUAL):
+    def __init__(self, id=None, substructs=None, data=None, base_struct=None, max_size=1, num_values=1, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
         super().__init__(id, substructs, data, base_struct, max_size, num_values, struct_type)
-        self.position = 0 # Index of this struct in context
+        self.position = position # Index of this struct in context
         self.context = context or [] # List of StructContextuals ordered by appearance in data
         self.relations = StructRelations(self)
 
@@ -20,6 +20,9 @@ class StructContextual(StructPrimitive):
 
     def get_relationship(self, other_struct):
         return self.relations.get(other_struct, None)
+    
+    def update_context(self, context):
+        self.context = context
 
 # The relationships a struct has with other structs
 class StructRelations:
@@ -33,11 +36,6 @@ class StructRelations:
     def update_relations(self, context):
         set_pos = True
         for i, struct in enumerate(context):
-            # Setting position (once)
-            if struct == self.struct and set_pos:
-                self.struct.position = i
-                set_pos = False
-            
             # Incrementing count
             if struct.id == self.struct.id:
                 self.count += 1
@@ -72,18 +70,14 @@ class Catalog:
         # TODO: Implement StructRelations
         pass
     
-    # Checks which data points match 1:1 with structures in the database
     def first_pass(self, data):
-        # This will store the structures as we match data
-        tmp_data = []
-        # Iterate on structs
-        for struct in self.database.struct_db.structs:
-            # Segment the data by max size of the struct
-            segments = self._segment_data(data, struct.get_total_size())
-            # Iterate on the segments
-            for seg in segments:
-                pass
-            
+        bit_struct = self.database.structs[0]
+        # Data variable is an array of bits, ex: [0, 0, 1, 1, 1, 0, 1, ...]
+        struct_contextuals = []
+        # Replace all bits with contextual bit structs
+        for i, bit in enumerate(data):
+            struct = StructContextual(0, base_struct=bit_struct, position=i, context=struct_contextuals)
+            struct_contextuals.append(struct)
     
     def _segment_data(self, data, num_bits):
         # Split binary data into chunks of specified size
