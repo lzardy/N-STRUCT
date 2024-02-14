@@ -54,7 +54,7 @@ class StructRelations:#
         if not isinstance(other, StructRelations):
             return False
         
-        # Simple K-Nearest Neighbors for distance equivalence
+        # Simple K-Nearest Neighbors for distance equivalence, k = 1 is good enough!
         k = 1
         distance_differences = [abs(self.distances[key] - other.distances[key]) for key in self.distances.keys() & other.distances.keys()]
         # Sort and select top k smallest differences
@@ -121,14 +121,15 @@ class Catalog:
         for struct in structs:
             if len(classes) > 0:
                 exists = False
-                for struct_class in classes:
-                    if struct_class == struct:
+                for struct_group in classes:
+                    if struct_group[0] == struct:
+                        struct_group.append(struct)
                         exists = True
                         break
                 if exists:
                     continue
             
-            classes.append(struct)
+            classes.append([struct])
         
         return classes
     
