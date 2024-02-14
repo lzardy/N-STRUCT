@@ -40,12 +40,12 @@ class StructBase:
 # Details the raw byte data that represents a struct and its substructs
 # Should only be kept in memory when actively being used
 class StructData(StructBase):
-    def __init__(self, id=None, substructs=None, data=None, num_values=1, struct_type=STYPE.DATA):
+    def __init__(self, id=None, substructs=None, values=None, num_values=1, struct_type=STYPE.DATA):
         super().__init__(id, substructs, struct_type)
-        if data:
-            self.data = data
+        if values:
+            self.values = values
         else:
-            self.data = []
+            self.values = []
         # Number of possible values this struct can represent (from 0)
         self.num_values = num_values
     
@@ -57,13 +57,13 @@ class StructData(StructBase):
     
     # Returns a copy of this struct
     def copy(self):
-        return StructData(self.id, self.substructs.copy(), self.data.copy(), self.num_values, self.type)
+        return StructData(self.id, self.substructs.copy(), self.values.copy(), self.num_values, self.type)
 
 # A unique struct built using other structs
 # Ex: Byte structs are 8 bits
 class StructPrimitive(StructData):
-    def __init__(self, id=None, substructs=None, data=None, base_struct=None, max_size=1, num_values=1, struct_type=STYPE.PRIMITIVE):
-        super().__init__(id, substructs, data, num_values, struct_type)
+    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, num_values=1, struct_type=STYPE.PRIMITIVE):
+        super().__init__(id, substructs, values, num_values, struct_type)
         self.base_struct = base_struct
         self.max_size = max_size
     
@@ -116,7 +116,7 @@ class StructDatabase:
         try:
             struct = self.structs[id]
             if struct.type == STYPE.DATA:
-                return struct.data
+                return struct.values
             else:
                 data = []
                 for substruct in struct.substructs:
@@ -128,7 +128,7 @@ class StructDatabase:
     # Gets the data of a struct by struct
     def get_data(self, struct):
         if struct.type == STYPE.DATA:
-            return struct.data
+            return struct.values
         else:
             data = []
             for substruct in struct.substructs:
