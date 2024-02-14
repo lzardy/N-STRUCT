@@ -111,12 +111,21 @@ class Catalog:
             struct.update_specific_relations()
             
             #print(f"Index: {struct.position}, Values: {struct.values}, Count: {struct.relations.count}, Count Differences: {struct.relations.count_diff}")
-
-        classes = self.declare_classes(structs)
-        print(f"Classes: {len(classes)}")
+            
+        # Iterative, variable-size group search
+        #self.find_patterns(structs)
     
+    # Scans structs by grouping and finds patterns between groups 
+    def find_patterns(self, structs):
+        classes = []
+        size = 1
+        while size <= len(structs):
+            # Array of arrays containing bits
+            groups = self._segment_data(structs, size)
+            # TODO: Finish
+            
     # Scans given contextual structures for duplicates and assigns them to classes
-    def declare_classes(self, structs):
+    def find_uniques(self, structs):
         classes = []
         for struct in structs:
             if len(classes) > 0:
