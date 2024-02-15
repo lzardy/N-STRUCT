@@ -10,7 +10,6 @@ This project is the foundation for a suite of tools, using the abstractions save
 ## Core
 These features are required, and together they accomplish the main goal.
 
-## Core
 - **File I/O**: Allows reading and writing string and byte data to disk.
 - **Database**: Utilizes a structured database system to store and manage data on the disk. The information in the database is saved as Structure Database Files (SDB).
 - **Catalog**: . Refer to the Cataloguing section below for more information.
