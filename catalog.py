@@ -113,34 +113,48 @@ class Catalog:
             #print(f"Index: {struct.position}, Values: {struct.values}, Count: {struct.relations.count}, Count Differences: {struct.relations.count_diff}")
             
         # Iterative, variable-size group search
-        #self.find_patterns(structs)
+        letters = self.find_patterns(structs, 8)
+        print("Letters: ", len(letters))
     
-    # Scans structs by grouping and finds patterns between groups 
-    def find_patterns(self, structs):
+    # Scans structs for duplicate groups and assigns them to classes
+    def find_patterns(self, structs, size):
         classes = []
-        size = 1
-        while size <= len(structs):
-            # Array of arrays containing bits
-            groups = self._segment_data(structs, size)
-            # TODO: Finish
-            
-    # Scans given contextual structures for duplicates and assigns them to classes
+        for group in self._group_structs(structs, size):
+            if len(classes) > 0:
+                exists = False
+                for class_groups in classes:
+                    if class_groups[0] == group:
+                        class_groups.append(group)
+                        exists = True
+                        break
+                if exists:
+                    continue
+            classes.append([group])
+        return classes
+
+    # Scans structs for duplicates and assigns them to classes
     def find_uniques(self, structs):
         classes = []
         for struct in structs:
             if len(classes) > 0:
                 exists = False
-                for struct_group in classes:
-                    if struct_group[0] == struct:
-                        struct_group.append(struct)
+                for group in classes:
+                    if group[0] == struct:
+                        group.append(struct)
                         exists = True
                         break
                 if exists:
                     continue
-            
             classes.append([struct])
-        
         return classes
+    
+    # Groups structs together by a given size
+    def _group_structs(self, structs, size):
+        groups = []
+        for i in range(0, len(structs), size):
+            group = structs[i:i+size]
+            groups.append(group)
+        return groups
     
     def _segment_data(self, data, num_bits):
         # Split binary data into chunks of specified size
