@@ -1,3 +1,4 @@
+import math
 from unittest.util import strclass
 from database import StructBase, StructPrimitive, DBCMD, STYPE
 
@@ -41,6 +42,11 @@ class StructContextual(StructPrimitive):
             # Getting difference in struct counts
             struct_count = struct.relations.count
             self.relations.count_diff[struct.position] = struct_count - self.relations.count
+    
+    # Update context and general struct relations
+    def update_context(self, context):
+        self.set_context(context)
+        self.update_general_relations()
 
 # The relationships a struct has with other structs
 class StructRelations:#
@@ -80,16 +86,19 @@ class Catalog:
     def try_catalog(self, data):
         blueprint = StructBase(struct_type=STYPE.BLUEPRINT)
         
-        structs = self.init_context(data)
+        structs = self.init_structs(data)
         self.find_relations(structs)
         
         # Return array of bits representing a blueprint
         return []
     
     # Initialize bit structures before finding relations
-    def init_context(self, data):
+    def init_structs(self, data):
+        return self.structs_from_data(data)
+    
+    def structs_from_data(self, data):
+        # Data variable is an array of bits, ex: [0, 1, 1, 0, ...]
         bit_struct = self.database.struct_db.structs[0]
-        # Data variable is an array of bits, ex: [0, 0, 1, 1, 1, 0, 1, ...]
         struct_contextuals = []
         
         # Replace all bits with contextual bit structs
@@ -97,34 +106,99 @@ class Catalog:
             struct = StructContextual(0, values=[bit], base_struct=bit_struct, position=i, context=struct_contextuals)
             struct_contextuals.append(struct)
             
-        # Update context and general struct relations
+        # Update relations
         for struct in struct_contextuals:
-            struct.set_context(struct_contextuals)
-            struct.update_general_relations()
-            
+            struct.update_context(struct_contextuals)
+        # Separate because it requires general relations to be finished first
+        for struct in struct_contextuals:
+            struct.update_specific_relations()
+        
         return struct_contextuals
+    
+    def structs_from_structs(self, structs):
+        new_structs = []
+        for i, group in enumerate(structs):
+            new_structs.append(StructContextual(
+                self.database.query(DBCMD.GET_NEW_ID),
+                group,
+                self.values_from_group(group[0]),
+                group[0][0].base_struct,
+                position=i
+            ))
+        
+        # Update relations
+        for struct in new_structs:
+            struct.update_context(new_structs)
+        # Separate because it requires general relations to be finished first
+        for struct in new_structs:
+            struct.update_specific_relations()
+        
+        return new_structs
+    
+    def values_from_group(self, group):
+        values = []
+        for struct in group:
+            for value in struct.values:
+                values.append(value)
+        
+        return values
+    
+    # Compresses structs by replacing groups of structs with a single struct
+    # Compression rate is (2 ^ factor)
+    def compress_structs(self, structs, factor=2):
+        if factor < 1:
+            return structs
+        
+        last_structs = structs.copy()
+        for i in range(factor):
+            uniques = self.find_uniques_all(last_structs, 2)
+            unique_structs = self.structs_from_structs(uniques)
+            
+            new_structs = []
+            struct_groups = self._group_structs(last_structs, 2)
+            for group in struct_groups:
+                values = self.values_from_group(group)
+                for struct in unique_structs:
+                    if struct.values == values:
+                        new_structs.append(struct)
+                        break
+            last_structs = new_structs
+        
+        return last_structs
     
     # Multi-pass relational analysis of the bit structs
     def find_relations(self, structs):
-        # Update all specific struct relations
-        for struct in structs:
-            struct.update_specific_relations()
-            
-            #print(f"Index: {struct.position}, Values: {struct.values}, Count: {struct.relations.count}, Count Differences: {struct.relations.count_diff}")
-            
-        # Iterative, variable-size group search
-        letters = self.find_patterns(structs, 8)
-        print("Letters: ", len(letters))
+        # Compresses structs
+        compressed_structs = self.compress_structs(structs, 5)
+        # Finds unique occurences in the compressed structs
+        uniques = self.find_uniques_all(compressed_structs, 1, True)
+        print("Unique 32 bits: ", len(uniques))
     
-    # Scans structs for duplicate groups and assigns them to classes
-    def find_patterns(self, structs, size):
+    # Scans structs for duplicate groups of a given size and assigns them to classes
+    # Optionally searches for novel combinations with excavate parameter
+    def find_uniques_all(self, structs, size, excavate=False, save_dupes=False):
         classes = []
-        for group in self._group_structs(structs, size):
+        offset = 0
+        
+        if (excavate):
+            while (offset < len(structs)):
+                classes.append(self.find_uniques_grouped(structs, size, offset, save_dupes))
+                offset += math.ceil(size / 2)
+        else:
+            classes = self.find_uniques_grouped(structs, size, save_dupes=save_dupes)
+            
+        return classes
+    
+    def find_uniques_grouped(self, structs, size, offset=0, save_dupes=False):
+        classes = []
+        group_structs = self._group_structs(structs[offset:], size)
+        for group in group_structs:
             if len(classes) > 0:
                 exists = False
                 for class_groups in classes:
                     if class_groups[0] == group:
-                        class_groups.append(group)
+                        if save_dupes:
+                            class_groups.append(group)
                         exists = True
                         break
                 if exists:
