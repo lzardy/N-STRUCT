@@ -1,79 +1,5 @@
 import math
-from database import StructPrimitive, DBCMD, STYPE
-
-# The current objective is to implement StructRelations by constructing a map of relationships in the data. Each data point (bit/byte/segment/etc) has a relationship with every other data point in an entire dataset.
-
-# A struct with relations to other structures (in context)
-class StructContextual(StructPrimitive):
-    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
-        super().__init__(id, substructs, values, base_struct, max_size, struct_type)
-        self.position = position # Index of this struct in context
-        self.context = context or [] # List of StructContextuals ordered by appearance in data
-        self.relations = StructRelations()
-    
-    # Checks if this struct is equal to a given variable
-    def __eq__(self, other):
-        return ((super().__eq__(other) and
-                 isinstance(other, StructContextual)) or
-            (self.values == other.values and
-            self.base_struct == other.base_struct and
-            self.relations == other.relations)
-        )
-    
-    def set_context(self, context):
-        self.context = context
-    
-    # Updates count and distance
-    def update_general_relations(self):
-        for i, struct in enumerate(self.context):
-            # Incrementing count
-            if struct.values == self.values:
-                self.relations.count += 1
-            
-            # Getting distance between other structs
-            struct_pos = struct.position
-            self.relations.distances[struct_pos] = abs(struct_pos - self.position)
-    
-    # Updates count_diff, specific relations use other struct relations
-    def update_specific_relations(self):
-        for struct in self.context:
-            # Getting difference in struct counts
-            struct_count = struct.relations.count
-            self.relations.count_diff[struct.position] = struct_count - self.relations.count
-    
-    # Update context and general struct relations
-    def update_context(self, context):
-        self.set_context(context)
-        self.update_general_relations()
-
-# The relationships a struct has with other structs
-class StructRelations:
-    def __init__(self):
-        self.count = 0 # How frequently the parent struct's values appear in context
-        self.distances = {} # Where the parent struct is, relative to other structs
-        self.count_diff = {} # Difference in how often the parent struct's values appear compared to other structs
-        
-    # Checks if current relations are equal to the given relations
-    def __eq__(self, other):
-        if not isinstance(other, StructRelations):
-            return False
-        
-        # Simple K-Nearest Neighbors for distance equivalence, k = 1 is good enough!
-        k = 1
-        distance_differences = [abs(self.distances[key] - other.distances[key]) for key in self.distances.keys() & other.distances.keys()]
-        # Sort and select top k smallest differences
-        sorted_differences = sorted(distance_differences)[:k]
-        # Average of k smallest differences
-        avg_difference = sum(sorted_differences) / k
-        # Threshold for equality
-        threshold =  1.0
-        distance_equal = avg_difference <= threshold
-        
-        return (
-            self.count == other.count and
-            self.count_diff == other.count_diff and
-            distance_equal
-        )
+from database import DBCMD, StructContextual
 
 class Catalog:
     def __init__(self, database, auto=False):
@@ -116,16 +42,17 @@ class Catalog:
     
     # Initialize bit structures before finding relations
     def init_structs(self, data):
+        self.database.query(DBCMD.ADD_STRUCT, StructContextual(0, values=[0]))
+        self.database.query(DBCMD.ADD_STRUCT, StructContextual(1, values=[1]))
         return self.structs_from_data(data)
     
     def structs_from_data(self, data):
         # Data variable is an array of bits, ex: [0, 1, 1, 0, ...]
-        bit_struct = self.database.query(DBCMD.GET_STRUCT_BY_ID, 0)
         struct_contextuals = []
         
         # Replace all bits with contextual bit structs
         for i, bit in enumerate(data):
-            struct = StructContextual(0, values=[bit], base_struct=bit_struct, position=i, context=struct_contextuals)
+            struct = StructContextual(bit, values=[bit], position=i, context=struct_contextuals)
             struct_contextuals.append(struct)
             
         # Update relations
@@ -140,12 +67,18 @@ class Catalog:
     def structs_from_structs(self, structs):
         new_structs = []
         for i, group in enumerate(structs):
-            new_structs.append(self.create_struct(
-                group[0],
-                None,
-                group[0][0].base_struct,
-                position=i
-            ))
+            substructs = group[0]
+            struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_SUBSTRUCTS, substructs)
+            if struct_existing:
+                new_structs.append(struct_existing)
+                continue
+            else:
+                new_structs.append(self.create_struct(
+                    substructs,
+                    None,
+                    substructs[0].base_struct,
+                    position=i
+                ))
         
         # Update relations
         for struct in new_structs:
@@ -188,6 +121,8 @@ class Catalog:
                     if struct.get_values() == values:
                         new_structs.append(struct)
                         break
+            if len(new_structs) == 0:
+                return last_structs
             last_structs = new_structs
         
         return last_structs

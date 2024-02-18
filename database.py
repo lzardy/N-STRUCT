@@ -95,6 +95,73 @@ class StructPrimitive(StructData):
         self.base_struct = base_struct
         self.max_size = max_size
     
+    # Calculates the maximum size the data of this struct can be
+    def get_total_size(self):
+        if self.base_struct:
+            return self.max_size * self.base_struct.get_total_size()
+        return self.max_size
+    
+    def to_bytes(self, full=False):
+        data = []
+        data.append(self.id)
+        substructs = self.get_substructs(full)
+        data.append(len(substructs))
+        data.extend(substructs)
+        data.append(self.type.value)
+        values = self.values
+        data.append(len(values))
+        data.extend(values)
+        if self.base_struct:
+            data.append(self.base_struct.id)
+        else:
+            data.append(self.id)
+        data.append(self.max_size)
+        
+        return to_bytes(data)
+        
+# A struct with relations to other structures (in context)
+class StructContextual(StructPrimitive):
+    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
+        super().__init__(id, substructs, values, base_struct, max_size, struct_type)
+        self.position = position # Index of this struct in context
+        self.context = context or [] # List of StructContextuals ordered by appearance in data
+        self.relations = StructRelations()
+    
+    # Checks if this struct is equal to a given variable
+    def __eq__(self, other):
+        return ((super().__eq__(other) and
+                 isinstance(other, StructContextual)) or
+            (self.values == other.values and
+            self.base_struct == other.base_struct and
+            self.relations == other.relations)
+        )
+    
+    def set_context(self, context):
+        self.context = context
+    
+    # Updates count and distance
+    def update_general_relations(self):
+        for i, struct in enumerate(self.context):
+            # Incrementing count
+            if struct.values == self.values:
+                self.relations.count += 1
+            
+            # Getting distance between other structs
+            struct_pos = struct.position
+            self.relations.distances[struct_pos] = abs(struct_pos - self.position)
+    
+    # Updates count_diff, specific relations use other struct relations
+    def update_specific_relations(self):
+        for struct in self.context:
+            # Getting difference in struct counts
+            struct_count = struct.relations.count
+            self.relations.count_diff[struct.position] = struct_count - self.relations.count
+    
+    # Update context and general struct relations
+    def update_context(self, context):
+        self.set_context(context)
+        self.update_general_relations()
+        
     def from_bytes(bytes):
         id = int.from_bytes(bytes[:4])
 
@@ -123,32 +190,37 @@ class StructPrimitive(StructData):
         max_size = int.from_bytes(bytes[values_end+8:values_end+12])
         
         # TODO: type and base_struct (if necessary)
-        return StructPrimitive(id, substructs, values, max_size=max_size)
-    
-    # Calculates the maximum size the data of this struct can be
-    def get_total_size(self):
-        if self.base_struct:
-            return self.max_size * self.base_struct.get_total_size()
-        return self.max_size
-    
-    def to_bytes(self, full=False):
-        data = []
-        data.append(self.id)
-        substructs = self.get_substructs(full)
-        data.append(len(substructs))
-        data.extend(substructs)
-        data.append(self.type.value)
-        values = self.values
-        data.append(len(values))
-        data.extend(values)
-        if self.base_struct:
-            data.append(self.base_struct.id)
-        else:
-            data.append(self.id)
-        data.append(self.max_size)
+        return StructContextual(id, substructs, values, max_size=max_size)
+
+# The relationships a struct has with other structs
+class StructRelations:
+    def __init__(self):
+        self.count = 0 # How frequently the parent struct's values appear in context
+        self.distances = {} # Where the parent struct is, relative to other structs
+        self.count_diff = {} # Difference in how often the parent struct's values appear compared to other structs
         
-        return to_bytes(data)
+    # Checks if current relations are equal to the given relations
+    def __eq__(self, other):
+        if not isinstance(other, StructRelations):
+            return False
         
+        # Simple K-Nearest Neighbors for distance equivalence, k = 1 is good enough!
+        k = 1
+        distance_differences = [abs(self.distances[key] - other.distances[key]) for key in self.distances.keys() & other.distances.keys()]
+        # Sort and select top k smallest differences
+        sorted_differences = sorted(distance_differences)[:k]
+        # Average of k smallest differences
+        avg_difference = sum(sorted_differences) / k
+        # Threshold for equality
+        threshold =  1.0
+        distance_equal = avg_difference <= threshold
+        
+        return (
+            self.count == other.count and
+            self.count_diff == other.count_diff and
+            distance_equal
+        )
+
 # Points to a StructData for quick access to StructData/StructBase locations in byte data
 # Kept in memory while idle
 class StructPointer:
@@ -178,23 +250,24 @@ class StructDatabase:
             # TODO: Implement queuing when adding structs and a temporary struct cache for commonly used structs during runtime and cataloging
             self.structs = []
             
-            self.default_fill()
+            #self.default_fill()
     
     # Fills structs array with default structures (bit, byte, integer, float, etc.)
-    def default_fill(self):
+    #def default_fill(self):
         # TODO: Verify if we want to generate all possible values for each struct
         # Bits (0 or 1)
-        bit = StructPrimitive(0)
-        self.structs.append(bit)
+        #bit = StructPrimitive(0, values=[0])
+        #self.structs.append(bit)
+        #self.structs.append(StructPrimitive(1, values=[1], base_struct=bit))
         # Bytes (0-255)
-        byte = StructPrimitive(1, base_struct=bit, max_size=8)
-        self.structs.append(byte)
+        #byte = StructPrimitive(1, base_struct=bit, max_size=8)
+        #self.structs.append(byte)
         # Integers/Characters (0-2^32-1), ASCII is 1 byte, unicode is 1-4 bytes
-        numeric = StructPrimitive(2, base_struct=byte, max_size=4)
-        self.structs.append(numeric)
+        #numeric = StructPrimitive(2, base_struct=byte, max_size=4)
+        #self.structs.append(numeric)
         # Floats (0-2^128-1), 8-bit floats are real I swear!
-        floating_point = StructPrimitive(3, base_struct=byte, max_size=16)
-        self.structs.append(floating_point)
+        #floating_point = StructPrimitive(3, base_struct=byte, max_size=16)
+        #self.structs.append(floating_point)
         # Arrays are a dynamic container and are contextual
         # So, we leave them for the catalog to declare
     
@@ -208,6 +281,19 @@ class StructDatabase:
                 struct_values = struct.get_values()
                 
             if struct and struct_values == values:
+                return struct
+        return None
+    
+    # Get the struct that has the given substructs
+    def get_substructs_owner(self, substructs):
+        substruct_ids = []
+        for struct in substructs:
+            substruct_ids.append(struct.id)
+        
+        for struct in self.structs:
+            struct_ids = struct.get_substructs(False, True)
+            # If all substruct IDs are matching
+            if all(x in struct_ids for x in substruct_ids):
                 return struct
         return None
     
@@ -250,9 +336,10 @@ class StructDatabase:
         
         byte_data = to_bytes(db_data)
         next_byte = len(byte_data)
+        ptrs = []
         for struct in self.structs:
             # Next byte will be the start of structs data
-            self.ptrs.append(StructPointer(struct.id, next_byte))
+            ptrs.append(StructPointer(struct.id, next_byte))
             struct_data = struct.to_bytes()
             byte_data.extend(struct_data)
             next_byte += len(struct_data)
@@ -260,7 +347,7 @@ class StructDatabase:
         ptr_data = []
         ptr_data.append("SDBP")
         ptr_file_data = to_bytes(ptr_data)
-        for ptr in self.ptrs:
+        for ptr in ptrs:
             ptr_file_data.extend(ptr.to_bytes())
         
         return bytes(byte_data), bytes(ptr_file_data)
@@ -288,8 +375,16 @@ class StructDatabase:
                     next_struct = ptrs[i+1].byteIndex
                     struct_data = db_bytes[ptr.byteIndex:next_struct-4]
                 
-                struct = StructPrimitive.from_bytes(struct_data)
+                struct = StructContextual.from_bytes(struct_data)
                 structs.append(struct)
+            
+            # Replace substruct IDs with struct references
+            for struct in structs:
+                substructs = []
+                for substruct_id in struct.substructs:
+                    substructs.append(structs[substruct_id])
+                struct.substructs = substructs
+            
             return StructDatabase(ptrs, structs)
         else:
             raise ValueError("Invalid Database or Pointer file.")
@@ -302,7 +397,7 @@ class DBCMD(IntFlag):
     GET_STRUCT_DATA = 1 << 2
     GET_STRUCT_BY_ID = 1 << 3
     GET_STRUCT_BY_DATA = 1 << 4
-    GET_ID = 1 << 5
+    GET_STRUCT_BY_SUBSTRUCTS = 1 << 5
     GET_SUB_IDS = 1 << 6
     GET_STRUCTS = 1 << 7
     
@@ -347,7 +442,7 @@ class Database():
         DBCMD.GET_STRUCT_DATA: (1, [object]),
         DBCMD.GET_STRUCT_BY_ID:(1, [object]),
         DBCMD.GET_STRUCT_BY_DATA:(1, [object]),
-        DBCMD.GET_ID: (1, [object]),
+        DBCMD.GET_STRUCT_BY_SUBSTRUCTS:(1, [object]),
         DBCMD.GET_SUB_IDS: (1, [int]),
         DBCMD.GET_STRUCTS: (0, []),
         DBCMD.SET_DATA: (2, [int, object]),
@@ -372,20 +467,19 @@ class Database():
     def __getStructData__(self, struct):
         return self.struct_db.get_data(struct)
     
+    # Retrieve struct by ID
+    def __getStructByID__(self, id):
+        if id >= len(self.struct_db.structs):
+            return None
+        return self.struct_db.structs[id]
+    
     # Retrieve struct by data
     def __getStructByData__(self, data):
         return self.struct_db.get_struct(data)
     
-    # Retrieve struct by data
-    def __getStructByID__(self, id):
-        return self.struct_db.structs[id]
-
-    # Retrieve ID by data
-    def __getID__(self, data):
-        try:
-            return self.struct_db.structs.index(data)
-        except:
-            return None
+    # Retrieve struct by substructs
+    def __getStructBySubstructs__(self, substructs):
+        return self.struct_db.get_substructs_owner(substructs)
 
     # Retrieve substruct IDs in given struct
     def __getSubIDs__(self, id):
@@ -403,7 +497,8 @@ class Database():
     
     # Adds a struct to the database
     def __addStruct__(self, struct):
-        self.struct_db.structs.append(struct)
+        if not self.__getStructByID__(struct.id):
+            self.struct_db.structs.append(struct)
     
     # Saves the Struct Database file
     def __saveDB__(self):
@@ -441,8 +536,8 @@ class Database():
             return self.__getStructByID__(args[0])
         elif cmd == DBCMD.GET_STRUCT_BY_DATA:
             return self.__getStructByData__(args[0])
-        elif cmd == DBCMD.GET_ID:
-            return self.__getID__(args[0])
+        elif cmd == DBCMD.GET_STRUCT_BY_SUBSTRUCTS:
+            return self.__getStructBySubstructs__(args[0])
         elif cmd == DBCMD.GET_SUB_IDS:
             return self.__getSubIDs__(args[0])
         elif cmd == DBCMD.GET_STRUCTS:
