@@ -6,8 +6,8 @@ from serializer import to_file
 
 # A struct with relations to other structures (in context)
 class StructContextual(StructPrimitive):
-    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, num_values=1, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
-        super().__init__(id, substructs, values, base_struct, max_size, num_values, struct_type)
+    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
+        super().__init__(id, substructs, values, base_struct, max_size, struct_type)
         self.position = position # Index of this struct in context
         self.context = context or [] # List of StructContextuals ordered by appearance in data
         self.relations = StructRelations()
@@ -112,7 +112,7 @@ class Catalog:
         data_structs = []
         for chunk in data_chunks:
             # Try replacing data with existing struct in database
-            struct_existing = self.database.struct_db.get_struct(data)
+            struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_DATA, data)
             if struct_existing:
                 data_structs.append(struct_existing)
                 continue
@@ -130,7 +130,7 @@ class Catalog:
     
     def structs_from_data(self, data):
         # Data variable is an array of bits, ex: [0, 1, 1, 0, ...]
-        bit_struct = self.database.struct_db.structs[0]
+        bit_struct = self.database.query(DBCMD.GET_STRUCT_BY_ID, 0)
         struct_contextuals = []
         
         # Replace all bits with contextual bit structs
@@ -152,7 +152,7 @@ class Catalog:
         for i, group in enumerate(structs):
             new_structs.append(self.create_struct(
                 group[0],
-                self.values_from_group(group[0]),
+                None,
                 group[0][0].base_struct,
                 position=i
             ))
@@ -169,8 +169,7 @@ class Catalog:
     def values_from_group(self, group):
         values = []
         for struct in group:
-            for value in struct.values:
-                values.append(value)
+            values.extend(struct.get_values())
         
         return values
     
@@ -198,7 +197,7 @@ class Catalog:
             for group in struct_groups:
                 values = self.values_from_group(group)
                 for struct in unique_structs:
-                    if struct.values == values:
+                    if struct.get_values() == values:
                         new_structs.append(struct)
                         break
             last_structs = new_structs
