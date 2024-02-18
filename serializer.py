@@ -1,7 +1,7 @@
 import struct
 
 # Converts an array of arbitrary data to bytes
-def to_file(data):
+def to_bytes(data):
     bytes_data = bytearray()
     for d in data:
         if isinstance(d, str):
@@ -11,5 +11,5 @@ def to_file(data):
             # Pack as  4-byte integer
             bytes_data.extend(struct.pack('I', d))
         # Zero byte for spacing
-        bytes_data.extend([0])
+        bytes_data.extend([0] * 4)
     return bytes_data

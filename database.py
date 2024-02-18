@@ -3,6 +3,7 @@ import os
 from re import S
 from error_handler import handle_errors
 from file_io import read_bytes, write_bytes
+from serializer import to_bytes
 
 # TODO: Utilize ZStandard Compression
 
@@ -26,6 +27,11 @@ class StructBase:
             self.substructs = []
         self.type = struct_type
     
+    # Checks if this struct is equal to a given variable
+    def __eq__(self, other):
+        return (isinstance(other, StructBase) and
+                other.substructs == self.substructs)
+    
     # Adds a substruct to this struct
     def add_substruct(self, substruct):
         self.substructs.append(substruct)
@@ -45,6 +51,13 @@ class StructBase:
             if full_tree and len(substruct.substructs) > 0:
                 structs.extend(substruct.get_substructs(by_id))
         return structs
+    
+    def to_blueprint(self, full=False):
+        data = []
+        data.append("SBP")
+        data.extend(self.get_substructs(full))
+        
+        return bytes(to_bytes(data))
 
 # TODO: Represents a struct through a data operation between some number of structs
 # class StructDelta:
@@ -87,6 +100,25 @@ class StructPrimitive(StructData):
         if self.base_struct:
             return self.max_size * self.base_struct.get_total_size()
         return self.max_size
+    
+    def to_bytes(self, full=False):
+        data = []
+        data.append(self.id)
+        substructs = self.get_substructs(full)
+        data.append(len(substructs))
+        data.extend(substructs)
+        data.append(self.type.value)
+        values = self.values
+        if values and len(values) > 0:
+            data.append(len(values))
+            data.extend(values)
+        if self.base_struct:
+            data.append(self.base_struct.id)
+        else:
+            data.append(self.id)
+        data.append(self.max_size)
+        
+        return to_bytes(data)
         
 # Points to a StructData for quick access to StructData/StructBase locations in byte data
 # Kept in memory while idle
@@ -94,6 +126,12 @@ class StructPointer:
     def __init__(self, id, index):
         self.structID = id
         self.byteIndex = index
+        
+    def to_bytes(self):
+        data = []
+        data.append(self.structID)
+        data.append(self.byteIndex)
+        return to_bytes(data)
 
 # The Struct Database File containing all database information
 class StructDatabase:
@@ -169,6 +207,29 @@ class StructDatabase:
             for substruct in struct.substructs:
                 data.append(self.get_data(substruct))
             return data
+    
+    # Returns the byte data for the Database and Pointers files
+    def to_sdb(self):
+        # Database data
+        db_data = []
+        db_data.append("SDB")
+        
+        byte_data = to_bytes(db_data)
+        next_byte = len(byte_data)
+        for struct in self.structs:
+            # Next byte will be the start of structs data
+            self.ptrs.append(StructPointer(struct.id, next_byte))
+            struct_data = struct.to_bytes()
+            db_data.extend(struct_data)
+            next_byte += len(struct_data)
+        
+        ptr_data = []
+        ptr_data.append("SDBP")
+        ptr_file_data = to_bytes(ptr_data)
+        for ptr in self.ptrs:
+            ptr_file_data.extend(ptr.to_bytes())
+        
+        return bytes(to_bytes(db_data)), bytes(ptr_file_data)
 
 # Database commands
 class DBCMD(IntFlag):
@@ -186,6 +247,9 @@ class DBCMD(IntFlag):
     SET_DATA = 1 << 8
     SET_STRUCT = 1 << 9
     ADD_STRUCT = 1 << 10
+    
+    # Others
+    SAVE_DB = 1 << 11
 
 # Container and handler which gets and sets data in the Struct Database File
 class Database():
@@ -217,6 +281,7 @@ class Database():
         DBCMD.SET_DATA: (2, [int, object]),
         DBCMD.SET_STRUCT: (2, [int, object]),
         DBCMD.ADD_STRUCT: (1, [object]),
+        DBCMD.SAVE_DB: (0, []),
     }
 
     # Gets and reserves the next ID for a new struct
@@ -267,6 +332,14 @@ class Database():
     # Adds a struct to the database
     def __addStruct__(self, struct):
         self.struct_db.structs.append(struct)
+    
+    # Saves the Struct Database file
+    def __saveDB__(self):
+        database_file, ptrs_file = self.struct_db.to_sdb()
+        write_bytes(self.sdb_path, database_file)
+        print("Saved Database to file:", self.sdb_path)
+        write_bytes(self.ptrs_path, ptrs_file)
+        print("Saved Pointers to file:", self.ptrs_path)
         
     # Checks if command + arguments are valid
     def __checkCMD__(self, cmd, args):
@@ -308,3 +381,5 @@ class Database():
             return self.__setStruct__(args[0], args[1])
         elif cmd == DBCMD.ADD_STRUCT:
             return self.__addStruct__(args[0])
+        elif cmd == DBCMD.SAVE_DB:
+            return self.__saveDB__()

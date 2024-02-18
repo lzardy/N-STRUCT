@@ -3,7 +3,7 @@ import os
 import sys
 from settings import Settings
 from catalog import Catalog
-from database import Database
+from database import DBCMD, Database
 
 # Order of operations in production:
 # 1. Manager checks for new data or user inputs a file
@@ -34,6 +34,12 @@ class Manager:
         
         file_data = read_bits(file_path)
         blueprint = self.catalog.try_catalog(file_data)
+        
+        if not blueprint:
+            print("Failed to generate blueprint!")
+            return
+        
+        self.database.query(DBCMD.SAVE_DB)
         
         # Save blueprint to file
         print("Saving blueprint to: ", os.path.join(data_dir, "blueprint"))

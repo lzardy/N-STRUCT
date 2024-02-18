@@ -1,6 +1,5 @@
 import math
-from database import StructBase, StructPrimitive, DBCMD, STYPE
-from serializer import to_file
+from database import StructPrimitive, DBCMD, STYPE
 
 # The current objective is to implement StructRelations by constructing a map of relationships in the data. Each data point (bit/byte/segment/etc) has a relationship with every other data point in an entire dataset.
 
@@ -14,12 +13,11 @@ class StructContextual(StructPrimitive):
     
     # Checks if this struct is equal to a given variable
     def __eq__(self, other):
-        if not isinstance(other, StructContextual):
-            return False
-        return (
-            self.values == other.values and
+        return ((super().__eq__(other) and
+                 isinstance(other, StructContextual)) or
+            (self.values == other.values and
             self.base_struct == other.base_struct and
-            self.relations == other.relations
+            self.relations == other.relations)
         )
     
     def set_context(self, context):
@@ -47,14 +45,6 @@ class StructContextual(StructPrimitive):
     def update_context(self, context):
         self.set_context(context)
         self.update_general_relations()
-    
-    def to_blueprint(self, full=False):
-        data = []
-        data.append("SBP")
-        data.extend(self.get_substructs(full))
-        
-        return to_file(data)
-         
 
 # The relationships a struct has with other structs
 class StructRelations:
@@ -183,9 +173,7 @@ class Catalog:
             max_bits = len(structs)
             # Sets factor to largest exponent which does not exceed structs length
             while (2 ** factor) < max_bits:
-                value = 2 ** factor
-                if value < max_bits:
-                    factor += 1
+                factor += 1
         
         last_structs = structs.copy()
         for i in range(factor):
