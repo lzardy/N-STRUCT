@@ -17,11 +17,8 @@ from database import DBCMD, Database
 class Manager:
     def __init__(self):
         if len(sys.argv) > 1:
-            # Relative to working directory or not
-            if sys.argv[2] == "true":
-                file_path = os.path.join(os.getcwd(), sys.argv[1])
-            else:
-                file_path = sys.argv[1]
+            # Relative to working directory
+            file_path = sys.argv[1]
         else:
             raise ValueError("No file path provided")
         
@@ -42,8 +39,8 @@ class Manager:
         self.database.query(DBCMD.SAVE_DB)
         
         # Save blueprint to file
-        print("Saving blueprint to: ", os.path.join(data_dir, "blueprint"))
-        write_bytes(os.path.join(data_dir, "blueprint"), blueprint)
+        print("Saving blueprint to: ", os.path.join(data_dir, "blueprint.sbp"))
+        write_bytes(os.path.join(data_dir, "blueprint.sbp"), blueprint)
 
 if __name__ == "__main__":
     Manager()

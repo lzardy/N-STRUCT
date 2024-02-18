@@ -8,8 +8,8 @@ def to_bytes(data):
             # Encode strings to bytes
             bytes_data.extend(d.encode('utf-8'))
         else:
-            # Pack as  4-byte integer
-            bytes_data.extend(struct.pack('I', d))
+            # Pack as  4-byte integer in big-endian order
+            bytes_data.extend(struct.pack('>I', d))
         # Zero byte for spacing
         bytes_data.extend([0] * 4)
     return bytes_data

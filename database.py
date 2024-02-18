@@ -95,6 +95,36 @@ class StructPrimitive(StructData):
         self.base_struct = base_struct
         self.max_size = max_size
     
+    def from_bytes(bytes):
+        id = int.from_bytes(bytes[:4])
+
+        substructs = []
+        # Each substruct is 4 bytes, separated by 4 zero bytes
+        substruct_count = int.from_bytes(bytes[8:12])
+        substructs_end = 16+(substruct_count*8)
+        if substruct_count > 0:
+            substructs_data = bytes[16:substructs_end]
+            while substructs_data:
+                substructs.append(int.from_bytes(substructs_data[:4]))
+                substructs_data = substructs_data[8:]
+        
+        type = STYPE(int.from_bytes(bytes[substructs_end:substructs_end+4]))
+        
+        values = []
+        value_count = int.from_bytes(bytes[substructs_end+8:substructs_end+12])
+        values_end = substructs_end+16+(value_count*8)
+        if value_count > 0:
+            values_data = bytes[substructs_end+16:values_end]
+            while values_data:
+                values.append(int.from_bytes(values_data[:4]))
+                values_data = values_data[8:]
+        
+        base_struct = int.from_bytes(bytes[values_end:values_end+4])
+        max_size = int.from_bytes(bytes[values_end+8:values_end+12])
+        
+        # TODO: type and base_struct (if necessary)
+        return StructPrimitive(id, substructs, values, max_size=max_size)
+    
     # Calculates the maximum size the data of this struct can be
     def get_total_size(self):
         if self.base_struct:
@@ -109,9 +139,8 @@ class StructPrimitive(StructData):
         data.extend(substructs)
         data.append(self.type.value)
         values = self.values
-        if values and len(values) > 0:
-            data.append(len(values))
-            data.extend(values)
+        data.append(len(values))
+        data.extend(values)
         if self.base_struct:
             data.append(self.base_struct.id)
         else:
@@ -127,6 +156,9 @@ class StructPointer:
         self.structID = id
         self.byteIndex = index
         
+    def from_bytes(bytes):
+        return StructPointer(int.from_bytes(bytes[:4]), int.from_bytes(bytes[8:]))
+        
     def to_bytes(self):
         data = []
         data.append(self.structID)
@@ -135,16 +167,18 @@ class StructPointer:
 
 # The Struct Database File containing all database information
 class StructDatabase:
-    def __init__(self, file_path):
-        # Contains the raw database byte data
-        self.data = read_bytes(file_path)
-        # Contains StructPointers, allows for quick access to StructData/StructBase locations in data
-        self.ptrs = []
-        # Contains StructBases/StructCounts
-        # TODO: Implement queuing when adding structs and a temporary struct cache for commonly used structs during runtime and cataloging
-        self.structs = []
-        
-        self.default_fill()
+    def __init__(self, ptrs=None, structs=None):
+        if ptrs and structs:
+            self.ptrs = ptrs
+            self.structs = structs
+        else:
+            # Contains StructPointers, allows for quick access to StructData/StructBase locations in data
+            self.ptrs = []
+            # Contains struct objects
+            # TODO: Implement queuing when adding structs and a temporary struct cache for commonly used structs during runtime and cataloging
+            self.structs = []
+            
+            self.default_fill()
     
     # Fills structs array with default structures (bit, byte, integer, float, etc.)
     def default_fill(self):
@@ -220,7 +254,7 @@ class StructDatabase:
             # Next byte will be the start of structs data
             self.ptrs.append(StructPointer(struct.id, next_byte))
             struct_data = struct.to_bytes()
-            db_data.extend(struct_data)
+            byte_data.extend(struct_data)
             next_byte += len(struct_data)
         
         ptr_data = []
@@ -229,7 +263,36 @@ class StructDatabase:
         for ptr in self.ptrs:
             ptr_file_data.extend(ptr.to_bytes())
         
-        return bytes(to_bytes(db_data)), bytes(ptr_file_data)
+        return bytes(byte_data), bytes(ptr_file_data)
+
+    @handle_errors
+    def from_bytes(db_bytes, ptrs_bytes):
+        # Match "SDB" and "SDBP"
+        db_str = db_bytes[:3].decode('utf-8')
+        ptrs_str = ptrs_bytes[:4].decode('utf-8')
+        if db_str == "SDB" and ptrs_str == "SDBP":
+            ptrs = []
+            # Skip header
+            ptrs_data = ptrs_bytes[8:]
+            while ptrs_data:
+                # Each data point is separated by 4 zero bytes
+                pointer = StructPointer.from_bytes(ptrs_data[:12])
+                ptrs.append(pointer)
+                ptrs_data = ptrs_data[16:]  # Move to the next StructPointer data
+            
+            structs = []
+            for i, ptr in enumerate(ptrs):
+                if i+1 >= len(ptrs):
+                    struct_data = db_bytes[ptr.byteIndex:]
+                else:
+                    next_struct = ptrs[i+1].byteIndex
+                    struct_data = db_bytes[ptr.byteIndex:next_struct-4]
+                
+                struct = StructPrimitive.from_bytes(struct_data)
+                structs.append(struct)
+            return StructDatabase(ptrs, structs)
+        else:
+            raise ValueError("Invalid Database or Pointer file.")
 
 # Database commands
 class DBCMD(IntFlag):
@@ -253,12 +316,13 @@ class DBCMD(IntFlag):
 
 # Container and handler which gets and sets data in the Struct Database File
 class Database():
+    @handle_errors
     def __init__(self, path):
         self.working_dir = path
         # Struct Database file containing all the structures
         self.sdb_path = os.path.join(self.working_dir, 'database.sdb')
         # Pointers file containing location data for individual structures, relevant for looking up stuff from the database file (quickly).
-        self.ptrs_path = os.path.join(self.working_dir, 'pointers.sdb')
+        self.ptrs_path = os.path.join(self.working_dir, 'pointers.sdbp')
         
         # Init database
         if not os.path.exists(self.sdb_path):
@@ -266,8 +330,16 @@ class Database():
         
         if not os.path.exists(self.ptrs_path):
             write_bytes(self.ptrs_path)
-            
-        self.struct_db = StructDatabase(self.sdb_path)
+        
+        db_bytes = read_bytes(self.sdb_path)
+        if db_bytes:
+            ptrs_bytes = read_bytes(self.ptrs_path)
+            if ptrs_bytes:
+                self.struct_db = StructDatabase.from_bytes(db_bytes, ptrs_bytes)
+            else:
+                raise ValueError("Failed to load pointers for database.")
+        else:
+            self.struct_db = StructDatabase()
         
     CMDARGS = {
         DBCMD.GET_NEW_ID: (0, []),
