@@ -1,4 +1,4 @@
-from file_io import read_bits, write_bits
+from file_io import read_bits, write_bytes
 import os
 import sys
 from settings import Settings
@@ -34,10 +34,10 @@ class Manager:
         
         file_data = read_bits(file_path)
         blueprint = self.catalog.try_catalog(file_data)
-
+        
         # Save blueprint to file
         print("Saving blueprint to: ", os.path.join(data_dir, "blueprint"))
-        write_bits(os.path.join(data_dir, "blueprint"), blueprint)
+        write_bytes(os.path.join(data_dir, "blueprint"), blueprint)
 
 if __name__ == "__main__":
     Manager()

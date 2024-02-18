@@ -1,6 +1,6 @@
 import math
-from unittest.util import strclass
 from database import StructBase, StructPrimitive, DBCMD, STYPE
+from serializer import to_file
 
 # The current objective is to implement StructRelations by constructing a map of relationships in the data. Each data point (bit/byte/segment/etc) has a relationship with every other data point in an entire dataset.
 
@@ -47,9 +47,17 @@ class StructContextual(StructPrimitive):
     def update_context(self, context):
         self.set_context(context)
         self.update_general_relations()
+    
+    def to_blueprint(self, full=False):
+        data = []
+        data.append("SBP")
+        data.extend(self.get_substructs(full))
+        
+        return to_file(data)
+         
 
 # The relationships a struct has with other structs
-class StructRelations:#
+class StructRelations:
     def __init__(self):
         self.count = 0 # How frequently the parent struct's values appear in context
         self.distances = {} # Where the parent struct is, relative to other structs
@@ -83,14 +91,38 @@ class Catalog:
         # TODO: Implement by checking file system for new files in data directory
         self.auto = auto
 
-    def try_catalog(self, data):
-        blueprint = StructBase(struct_type=STYPE.BLUEPRINT)
+    # Makes a struct from parameters and adds it to the database
+    def create_struct(self, substructs, values, base_struct, position):
+        id = self.database.query(DBCMD.GET_NEW_ID)
+        struct = StructContextual(
+            id,
+            substructs,
+            values,
+            base_struct,
+            position=position
+        )
+        self.database.query(DBCMD.SET_STRUCT, id, struct)
+        return struct
+
+    # Interprets bit data, saves important features to the database, and returns a blueprint of the data
+    def try_catalog(self, data, chunk_size=1024):
+        # Segment for efficiency
+        data_chunks = self._segment_data(data, chunk_size)
         
-        structs = self.init_structs(data)
-        self.find_relations(structs)
-        
-        # Return array of bits representing a blueprint
-        return []
+        data_structs = []
+        for chunk in data_chunks:
+            # Try replacing data with existing struct in database
+            struct_existing = self.database.struct_db.get_struct(data)
+            if struct_existing:
+                data_structs.append(struct_existing)
+                continue
+            
+            structs = self.init_structs(chunk)
+            # Gets a single struct to represent all of the data
+            data_struct = self.find_relations(structs)[0]
+            data_structs.append(data_struct)
+        # Return array of bytes representing a blueprint
+        return self.find_relations(data_structs)[0].to_blueprint()
     
     # Initialize bit structures before finding relations
     def init_structs(self, data):
@@ -118,9 +150,8 @@ class Catalog:
     def structs_from_structs(self, structs):
         new_structs = []
         for i, group in enumerate(structs):
-            new_structs.append(StructContextual(
-                self.database.query(DBCMD.GET_NEW_ID),
-                group,
+            new_structs.append(self.create_struct(
+                group[0],
                 self.values_from_group(group[0]),
                 group[0][0].base_struct,
                 position=i
@@ -146,8 +177,16 @@ class Catalog:
     # Compresses structs by replacing groups of structs with a single struct
     # Compression rate is (2 ^ factor)
     def compress_structs(self, structs, factor=2):
-        if factor < 1:
+        if factor == 0:
             return structs
+        if factor < 0:
+            factor = 0
+            max_bits = len(structs)
+            # Sets factor to largest exponent which does not exceed structs length
+            while (2 ** factor) < max_bits:
+                value = 2 ** factor
+                if value < max_bits:
+                    factor += 1
         
         last_structs = structs.copy()
         for i in range(factor):
@@ -167,12 +206,13 @@ class Catalog:
         return last_structs
     
     # Multi-pass relational analysis of the bit structs
-    def find_relations(self, structs):
+    # By default, the return value represents all structs as a single struct
+    def find_relations(self, structs, factor=-1):
+        # TODO: Curate compression to get more meaningful abstractions? File-type specific stuff?
         # Compresses structs
-        compressed_structs = self.compress_structs(structs, 5)
-        # Finds unique occurences in the compressed structs
-        uniques = self.find_uniques_all(compressed_structs, 1, True)
-        print("Unique 32 bits: ", len(uniques))
+        compressed_structs = self.compress_structs(structs, factor)
+        
+        return compressed_structs
     
     # Scans structs for duplicate groups of a given size and assigns them to classes
     # Optionally searches for novel combinations with excavate parameter

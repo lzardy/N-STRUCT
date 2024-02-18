@@ -33,6 +33,18 @@ class StructBase:
     # Returns a copy of this struct
     def copy(self):
         return StructBase(self.id, self.substructs.copy(), self.type)
+    
+    def get_substructs(self, full_tree=False, by_id=True):
+        structs = []
+        
+        for substruct in self.substructs:
+            if by_id:
+                structs.append(substruct.id)
+            else:
+                structs.append(substruct)
+            if full_tree and len(substruct.substructs) > 0:
+                structs.extend(substruct.get_substructs(by_id))
+        return structs
 
 # TODO: Represents a struct through a data operation between some number of structs
 # class StructDelta:
@@ -111,6 +123,20 @@ class StructDatabase:
         # Arrays are a dynamic container and are contextual
         # So, we leave them for the catalog to declare
     
+    # Get a struct by data
+    def get_struct(self, values):
+        for struct in self.structs:
+            if struct and struct.values == values:
+                return struct
+        return None
+    
+    # Get the id of a struct by data
+    def get_id(self, values):
+        for struct in self.structs:
+            if struct.values == values:
+                return struct.id
+        return None
+    
     # Gets the data of a struct by ID
     def get_data(self, id):
         try:
@@ -147,7 +173,8 @@ class DBCMD(IntFlag):
     
     # Setters
     SET_DATA = 1 << 6
-    ADD_STRUCT = 1 << 7
+    SET_STRUCT = 1 << 7
+    ADD_STRUCT = 1 << 8
 
 # Container and handler which gets and sets data in the Struct Database File
 class Database():
@@ -175,7 +202,8 @@ class Database():
         DBCMD.GET_SUB_IDS: (1, [int]),
         DBCMD.GET_STRUCTS: (0, []),
         DBCMD.SET_DATA: (2, [int, object]),
-        DBCMD.ADD_STRUCT: (2, [object]),
+        DBCMD.SET_STRUCT: (2, [int, object]),
+        DBCMD.ADD_STRUCT: (1, [object]),
     }
 
     # Gets and reserves the next ID for a new struct
@@ -210,6 +238,10 @@ class Database():
         struct = self.struct_db.structs[id]
         if struct.type != STYPE.DATA:
             self.struct_db.structs[id] = StructData(id, struct.substructs, data)
+    
+    # Assigns a struct to a given ID
+    def __setStruct__(self, id, struct):
+        self.struct_db.structs[id] = struct
     
     # Adds a struct to the database
     def __addStruct__(self, struct):
@@ -247,5 +279,7 @@ class Database():
             return self.struct_db.structs
         elif cmd == DBCMD.SET_DATA:
             return self.__setData__(args[0], args[1])
+        elif cmd == DBCMD.SET_STRUCT:
+            return self.__setStruct__(args[0], args[1])
         elif cmd == DBCMD.ADD_STRUCT:
             return self.__addStruct__(args[0])
