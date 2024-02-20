@@ -85,7 +85,11 @@ class StructData(StructBase):
     
     # Returns a copy of this struct
     def copy(self):
-        return StructData(self.id, self.substructs.copy(), self.values.copy(), self.type)
+        return StructData(
+            self.id, 
+            self.substructs.copy(), 
+            self.values.copy(), 
+            self.type)
 
 # A unique struct built using other structs
 # Ex: Byte structs are 8 bits
@@ -94,6 +98,16 @@ class StructPrimitive(StructData):
         super().__init__(id, substructs, values, struct_type)
         self.base_struct = base_struct
         self.max_size = max_size
+    
+    # Returns a copy of this struct
+    def copy(self):
+        return StructPrimitive(
+            self.id,
+            self.substructs.copy(),
+            self.values.copy(),
+            self.base_struct,
+            self.max_size,
+            self.type)
     
     # Calculates the maximum size the data of this struct can be
     def get_total_size(self):
@@ -135,6 +149,16 @@ class StructContextual(StructPrimitive):
             self.base_struct == other.base_struct and
             self.relations == other.relations)
         )
+    
+    # Returns a copy of this struct
+    def copy(self):
+        return StructContextual(
+            self.id,
+            self.substructs.copy(),
+            self.values.copy(),
+            self.base_struct,
+            self.max_size,
+            struct_type=self.type)
     
     def set_context(self, context):
         self.context = context
@@ -281,14 +305,18 @@ class StructDatabase:
                 struct_values = struct.get_values()
                 
             if struct and struct_values == values:
-                return struct
+                return struct.copy()
         return None
     
     # Get the struct that has the given substructs
-    def get_substructs_owner(self, substructs):
+    def get_substructs_owner(self, substructs, ids=False):
         substruct_ids = []
-        for struct in substructs:
-            substruct_ids.append(struct.id)
+        
+        if ids:
+            substruct_ids = substructs
+        else:
+            for struct in substructs:
+                substruct_ids.append(struct.id)
         
         for struct in self.structs:
             struct_ids = struct.get_substructs(False, True)
@@ -442,7 +470,7 @@ class Database():
         DBCMD.GET_STRUCT_DATA: (1, [object]),
         DBCMD.GET_STRUCT_BY_ID:(1, [object]),
         DBCMD.GET_STRUCT_BY_DATA:(1, [object]),
-        DBCMD.GET_STRUCT_BY_SUBSTRUCTS:(1, [object]),
+        DBCMD.GET_STRUCT_BY_SUBSTRUCTS:(2, [object, bool]),
         DBCMD.GET_SUB_IDS: (1, [int]),
         DBCMD.GET_STRUCTS: (0, []),
         DBCMD.SET_DATA: (2, [int, object]),
@@ -478,8 +506,8 @@ class Database():
         return self.struct_db.get_struct(data)
     
     # Retrieve struct by substructs
-    def __getStructBySubstructs__(self, substructs):
-        return self.struct_db.get_substructs_owner(substructs)
+    def __getStructBySubstructs__(self, substructs, ids):
+        return self.struct_db.get_substructs_owner(substructs, ids)
 
     # Retrieve substruct IDs in given struct
     def __getSubIDs__(self, id):
@@ -537,7 +565,7 @@ class Database():
         elif cmd == DBCMD.GET_STRUCT_BY_DATA:
             return self.__getStructByData__(args[0])
         elif cmd == DBCMD.GET_STRUCT_BY_SUBSTRUCTS:
-            return self.__getStructBySubstructs__(args[0])
+            return self.__getStructBySubstructs__(args[0], args[1])
         elif cmd == DBCMD.GET_SUB_IDS:
             return self.__getSubIDs__(args[0])
         elif cmd == DBCMD.GET_STRUCTS:
