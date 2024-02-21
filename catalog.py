@@ -25,48 +25,27 @@ class Catalog:
         self.database.query(DBCMD.ADD_STRUCT, StructContextual(0, values=[0]))
         self.database.query(DBCMD.ADD_STRUCT, StructContextual(1, values=[1]))
         
-        # Segment for efficiency
-        data_chunks = self._segment_data(data, chunk_size)
+        data_existing = self.database.query(DBCMD.GET_STRUCT_BY_DATA, data)
         
-        data_structs = []
-        for chunk in data_chunks:
-            structs = self.init_structs(chunk)
-            # Gets a single struct to represent all of the data
-            data_struct = self.find_relations(structs)[0]
-            data_structs.append(data_struct)
+        if data_existing:
+            return data_existing.to_blueprint()
+        
+        structs = self.init_structs(data)
+        final_struct = self.find_relations(structs)[0]
+        
         # Return array of bytes representing a blueprint
-        return self.find_relations(data_structs)[0].to_blueprint()
+        final_struct_values = final_struct.get_values()
+        is_equal = final_struct_values == data
+        return final_struct.to_blueprint()
     
     # Initialize bit structures before finding relations
     def init_structs(self, data):
-        return self.structs_from_data(data)
-    
-    def structs_from_data(self, data):
         # Data variable is an array of bits, ex: [0, 1, 1, 0, ...]
         struct_contextuals = []
-        
-        segment_size = 2
-        while segment_size < len(data):
-            segmented_data = self._segment_data(data, segment_size)
-            for segment in segmented_data:
-                struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_SUBSTRUCTS, segment, True)
-                if (struct_existing and (len(struct_contextuals) == 0 or not struct_existing.values == struct_contextuals[-1].values)):
-                    if len(struct_contextuals) == 0 or not struct_existing == struct_contextuals[-1]:
-                        struct_contextuals.append(struct_existing)
-            segment_size *= 2
-        
-        # Replace all bits with contextual bit structs as an initialization
-        if not struct_existing:
-            for i, bit in enumerate(data):
-                struct = StructContextual(bit, values=[bit], position=i, context=struct_contextuals)
-                struct_contextuals.append(struct)
-            
-        # Update relations
-        for struct in struct_contextuals:
-            struct.update_context(struct_contextuals)
-        # Separate because it requires general relations to be finished first
-        for struct in struct_contextuals:
-            struct.update_specific_relations()
+        for i, bit in enumerate(data):
+            struct = self.database.query(DBCMD.GET_STRUCT_BY_ID, bit)
+            struct.position = i
+            struct_contextuals.append(struct)
         
         return struct_contextuals
     
@@ -108,7 +87,7 @@ class Catalog:
         if factor == 0:
             return structs
         if factor < 0:
-            factor = 0
+            factor = 1
             max_bits = len(structs)
             # Sets factor to largest exponent which does not exceed structs length
             while (2 ** factor) < max_bits:
@@ -164,7 +143,14 @@ class Catalog:
             if len(classes) > 0:
                 exists = False
                 for class_groups in classes:
-                    if class_groups[0] == group:
+                    class_group_vals = []
+                    for struct in class_groups[0]:
+                        class_group_vals.extend(struct.get_values())
+                    group_vals = []
+                    for struct in group:
+                        group_vals.extend(struct.get_values())
+                    
+                    if class_group_vals == group_vals:
                         if save_dupes:
                             class_groups.append(group)
                         exists = True

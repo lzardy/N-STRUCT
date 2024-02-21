@@ -321,8 +321,8 @@ class StructDatabase:
         for struct in self.structs:
             struct_ids = struct.get_substructs(False, True)
             # If all substruct IDs are matching
-            if all(x in struct_ids for x in substruct_ids):
-                return struct
+            if struct_ids == substruct_ids:
+                return struct.copy()
         return None
     
     # Get the id of a struct by data
