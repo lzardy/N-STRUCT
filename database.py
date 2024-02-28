@@ -26,6 +26,8 @@ class StructBase:
         else:
             self.substructs = []
         self.type = struct_type
+        
+        self.cached_substructs = None
     
     # Checks if this struct is equal to a given variable
     def __eq__(self, other):
@@ -43,6 +45,9 @@ class StructBase:
     def get_substructs(self, full_tree=False, by_id=True):
         structs = []
         
+        if self.cached_substructs:
+            return self.cached_substructs
+        
         for substruct in self.substructs:
             if by_id:
                 structs.append(substruct.id)
@@ -50,12 +55,19 @@ class StructBase:
                 structs.append(substruct)
             if full_tree and len(substruct.substructs) > 0:
                 structs.extend(substruct.get_substructs(by_id))
+        
+        self.cached_substructs = structs
         return structs
     
     def to_blueprint(self, full=False):
         data = []
         data.append("SBP")
-        data.extend(self.get_substructs(full))
+        data.append(self.id)
+        
+        if full:
+            for struct in self.substructs:
+                data.append(struct.id)
+                data.extend(struct.get_substructs(full))
         
         return bytes(to_bytes(data))
 
@@ -71,6 +83,8 @@ class StructData(StructBase):
             self.values = values
         else:
             self.values = []
+            
+        self.cached_values = None
     
     # Returns the data that this struct represents
     def get_values(self):
@@ -79,8 +93,12 @@ class StructData(StructBase):
         
         values = []
         if len(self.substructs) > 0:
+            if self.cached_values:
+                return self.cached_values
             for struct in self.substructs:
                 values.extend(struct.get_values())
+                
+        self.cached_values = values
         return values
     
     # Returns a copy of this struct
@@ -94,10 +112,9 @@ class StructData(StructBase):
 # A unique struct built using other structs
 # Ex: Byte structs are 8 bits
 class StructPrimitive(StructData):
-    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, struct_type=STYPE.PRIMITIVE):
+    def __init__(self, id=None, substructs=None, values=None, base_struct=None, struct_type=STYPE.PRIMITIVE):
         super().__init__(id, substructs, values, struct_type)
         self.base_struct = base_struct
-        self.max_size = max_size
     
     # Returns a copy of this struct
     def copy(self):
@@ -106,37 +123,34 @@ class StructPrimitive(StructData):
             self.substructs.copy(),
             self.values.copy(),
             self.base_struct,
-            self.max_size,
             self.type)
-    
-    # Calculates the maximum size the data of this struct can be
-    def get_total_size(self):
-        if self.base_struct:
-            return self.max_size * self.base_struct.get_total_size()
-        return self.max_size
     
     def to_bytes(self, full=False):
         data = []
+        
         data.append(self.id)
+        
         substructs = self.get_substructs(full)
         data.append(len(substructs))
         data.extend(substructs)
+        
         data.append(self.type.value)
+        
         values = self.values
         data.append(len(values))
         data.extend(values)
+            
         if self.base_struct:
             data.append(self.base_struct.id)
         else:
             data.append(self.id)
-        data.append(self.max_size)
         
         return to_bytes(data)
         
 # A struct with relations to other structures (in context)
 class StructContextual(StructPrimitive):
-    def __init__(self, id=None, substructs=None, values=None, base_struct=None, max_size=1, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
-        super().__init__(id, substructs, values, base_struct, max_size, struct_type)
+    def __init__(self, id=None, substructs=None, values=None, base_struct=None, position=0, context=None, struct_type=STYPE.CONTEXTUAL):
+        super().__init__(id, substructs, values, base_struct, struct_type)
         self.position = position # Index of this struct in context
         self.context = context or [] # List of StructContextuals ordered by appearance in data
         self.relations = StructRelations()
@@ -157,7 +171,6 @@ class StructContextual(StructPrimitive):
             self.substructs.copy(),
             self.values.copy(),
             self.base_struct,
-            self.max_size,
             struct_type=self.type)
     
     def set_context(self, context):
@@ -211,10 +224,9 @@ class StructContextual(StructPrimitive):
                 values_data = values_data[8:]
         
         base_struct = int.from_bytes(bytes[values_end:values_end+4])
-        max_size = int.from_bytes(bytes[values_end+8:values_end+12])
         
         # TODO: type and base_struct (if necessary)
-        return StructContextual(id, substructs, values, max_size=max_size)
+        return StructContextual(id, substructs, values)
 
 # The relationships a struct has with other structs
 class StructRelations:
@@ -273,27 +285,6 @@ class StructDatabase:
             # Contains struct objects
             # TODO: Implement queuing when adding structs and a temporary struct cache for commonly used structs during runtime and cataloging
             self.structs = []
-            
-            #self.default_fill()
-    
-    # Fills structs array with default structures (bit, byte, integer, float, etc.)
-    #def default_fill(self):
-        # TODO: Verify if we want to generate all possible values for each struct
-        # Bits (0 or 1)
-        #bit = StructPrimitive(0, values=[0])
-        #self.structs.append(bit)
-        #self.structs.append(StructPrimitive(1, values=[1], base_struct=bit))
-        # Bytes (0-255)
-        #byte = StructPrimitive(1, base_struct=bit, max_size=8)
-        #self.structs.append(byte)
-        # Integers/Characters (0-2^32-1), ASCII is 1 byte, unicode is 1-4 bytes
-        #numeric = StructPrimitive(2, base_struct=byte, max_size=4)
-        #self.structs.append(numeric)
-        # Floats (0-2^128-1), 8-bit floats are real I swear!
-        #floating_point = StructPrimitive(3, base_struct=byte, max_size=16)
-        #self.structs.append(floating_point)
-        # Arrays are a dynamic container and are contextual
-        # So, we leave them for the catalog to declare
     
     # Get the struct that has the given data
     def get_struct(self, values):
@@ -303,7 +294,6 @@ class StructDatabase:
                 struct_values = struct.values
             else:
                 struct_values = struct.get_values()
-                
             if struct and struct_values == values:
                 return struct.copy()
         return None
@@ -332,20 +322,6 @@ class StructDatabase:
                 return struct.id
         return None
     
-    # Gets the data of a struct by ID
-    def get_data(self, id):
-        try:
-            struct = self.structs[id]
-            if struct.type == STYPE.DATA:
-                return struct.values
-            else:
-                data = []
-                for substruct in struct.substructs:
-                    data.append(self.get_data(substruct))
-                return data
-        except:
-            return []
-    
     # Gets the data of a struct by struct
     def get_data(self, struct):
         if struct.type == STYPE.DATA:
@@ -355,6 +331,14 @@ class StructDatabase:
             for substruct in struct.substructs:
                 data.append(self.get_data(substruct))
             return data
+        
+    # Gets all structs with values of a given length
+    def get_structs_length(self, length):
+        structs = []
+        for struct in self.structs:
+            if len(struct.get_values()) == length:
+                structs.append(struct)
+        return structs
     
     # Returns the byte data for the Database and Pointers files
     def to_sdb(self):
@@ -421,21 +405,22 @@ class StructDatabase:
 class DBCMD(IntFlag):
     # Getters
     GET_NEW_ID = 1 << 0
-    GET_DATA = 1 << 1
-    GET_STRUCT_DATA = 1 << 2
-    GET_STRUCT_BY_ID = 1 << 3
-    GET_STRUCT_BY_DATA = 1 << 4
-    GET_STRUCT_BY_SUBSTRUCTS = 1 << 5
+    GET_STRUCT_DATA = 1 << 1
+    GET_STRUCT_BY_ID = 1 << 2
+    GET_STRUCT_BY_DATA = 1 << 3
+    GET_STRUCT_BY_SUBSTRUCTS = 1 << 4
+    GET_STRUCTS_BY_LENGTH = 1 << 5
     GET_SUB_IDS = 1 << 6
     GET_STRUCTS = 1 << 7
+    GET_BLUEPRINT_BYTES = 1 << 8
     
     # Setters
-    SET_DATA = 1 << 8
-    SET_STRUCT = 1 << 9
-    ADD_STRUCT = 1 << 10
+    SET_DATA = 1 << 9
+    SET_STRUCT = 1 << 10
+    ADD_STRUCT = 1 << 11
     
     # Others
-    SAVE_DB = 1 << 11
+    SAVE_DB = 1 << 12
 
 # Container and handler which gets and sets data in the Struct Database File
 class Database():
@@ -465,14 +450,15 @@ class Database():
             self.struct_db = StructDatabase()
         
     CMDARGS = {
-        DBCMD.GET_NEW_ID: (0, []),
-        DBCMD.GET_DATA: (1, [int]),
+        DBCMD.GET_NEW_ID: (1, [bool]),
         DBCMD.GET_STRUCT_DATA: (1, [object]),
         DBCMD.GET_STRUCT_BY_ID:(1, [object]),
         DBCMD.GET_STRUCT_BY_DATA:(1, [object]),
         DBCMD.GET_STRUCT_BY_SUBSTRUCTS:(2, [object, bool]),
+        DBCMD.GET_STRUCTS_BY_LENGTH:(1, [int]),
         DBCMD.GET_SUB_IDS: (1, [int]),
         DBCMD.GET_STRUCTS: (0, []),
+        DBCMD.GET_BLUEPRINT_BYTES: (1, [object]),
         DBCMD.SET_DATA: (2, [int, object]),
         DBCMD.SET_STRUCT: (2, [int, object]),
         DBCMD.ADD_STRUCT: (1, [object]),
@@ -481,15 +467,12 @@ class Database():
 
     # Gets and reserves the next ID for a new struct
     # Essentially appends a new struct to the end of the database file
-    def __getNewID__(self):
+    def __getNewID__(self, append=True):
         new_id = len(self.struct_db.structs)
-        self.struct_db.structs.append(None)
+        if append:
+            self.struct_db.structs.append(None)
         
         return new_id
-
-    # Retrieve data by ID
-    def __getData__(self, id):
-        return self.struct_db.get_data(id)
     
     # Retrieve data by struct
     def __getStructData__(self, struct):
@@ -509,9 +492,20 @@ class Database():
     def __getStructBySubstructs__(self, substructs, ids):
         return self.struct_db.get_substructs_owner(substructs, ids)
 
+    # Retrieve structs by value length
+    def __getStructsByLength__(self, length):
+        return self.struct_db.get_structs_length(length)
+
     # Retrieve substruct IDs in given struct
     def __getSubIDs__(self, id):
         return self.struct_db.structs[id].substructs
+    
+    # Returns the byte data of the struct referenced by ID in a blueprint
+    def __getBlueprintBytes(self, bytes):
+        # Get all substruct IDs
+        struct_id = int.from_bytes(bytes[:4])
+        struct = self.struct_db.structs[struct_id]
+        return struct.get_values()
     
     # Assigns data to a given ID
     def __setData__(self, id, data):
@@ -555,9 +549,7 @@ class Database():
         self.__checkCMD__(cmd, args)
         
         if cmd == DBCMD.GET_NEW_ID:
-            return self.__getNewID__()
-        elif cmd == DBCMD.GET_DATA:
-            return self.__getData__(args[0])
+            return self.__getNewID__(args[0])
         elif cmd == DBCMD.GET_STRUCT_DATA:
             return self.__getStructData__(args[0])
         elif cmd == DBCMD.GET_STRUCT_BY_ID:
@@ -566,10 +558,14 @@ class Database():
             return self.__getStructByData__(args[0])
         elif cmd == DBCMD.GET_STRUCT_BY_SUBSTRUCTS:
             return self.__getStructBySubstructs__(args[0], args[1])
+        elif cmd == DBCMD.GET_STRUCTS_BY_LENGTH:
+            return self.__getStructsByLength__(args[0])
         elif cmd == DBCMD.GET_SUB_IDS:
             return self.__getSubIDs__(args[0])
         elif cmd == DBCMD.GET_STRUCTS:
             return self.struct_db.structs
+        elif cmd == DBCMD.GET_BLUEPRINT_BYTES:
+            return self.__getBlueprintBytes(args[0])
         elif cmd == DBCMD.SET_DATA:
             return self.__setData__(args[0], args[1])
         elif cmd == DBCMD.SET_STRUCT:

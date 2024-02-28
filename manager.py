@@ -1,4 +1,6 @@
-from file_io import read_bits, write_bytes
+import time
+from error_handler import handle_errors
+from file_io import read_bits, read_bytes, write_bits, write_bytes
 import os
 import sys
 from settings import Settings
@@ -29,18 +31,40 @@ class Manager:
        
         self.catalog = Catalog(self.database, self.settings.auto_catalog)
         
-        file_data = read_bits(file_path)
+        start_time = time.time()
+        
+        file_data = read_bytes(file_path)
+        
+        if self.is_blueprint(file_data):
+            file_data = self.database.query(DBCMD.GET_BLUEPRINT_BYTES, file_data[7:])
+            bp_raw_path = os.path.join(data_dir, "blueprint.raw")
+            write_bits(bp_raw_path, file_data)
+            print("Saved raw blueprint data to: ", bp_raw_path)
+            return
+        
+        file_data = [byte for byte in file_data]
         blueprint = self.catalog.try_catalog(file_data)
         
         if not blueprint:
             print("Failed to generate blueprint!")
             return
         
-        self.database.query(DBCMD.SAVE_DB)
+        end_time = time.time()  # Record the end time
+        cataloging_duration = end_time - start_time  # Calculate the duration
+        
+        print(f"Catalogued file in: {int(cataloging_duration)} seconds.")
         
         # Save blueprint to file
         print("Saving blueprint to: ", os.path.join(data_dir, "blueprint.sbp"))
         write_bytes(os.path.join(data_dir, "blueprint.sbp"), blueprint)
+
+    def is_blueprint(self, bytes):
+        # Match "SBP"
+        try:
+            sbp_str = bytes[:3].decode('utf-8')
+            return sbp_str == "SBP"
+        except:
+            return False
 
 if __name__ == "__main__":
     Manager()
