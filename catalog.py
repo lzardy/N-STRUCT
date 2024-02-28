@@ -9,20 +9,56 @@ class Catalog:
         self.auto = auto
         self.database_lock = threading.Lock()
 
-    # Makes a struct from parameters and adds it to the database
-    def create_struct(self, substructs, values, base_struct, position):
-        with self.database_lock:
-            id = self.database.query(DBCMD.GET_NEW_ID, False)
-            struct = StructContextual(
-                id,
-                substructs,
-                values,
-                base_struct,
-                position=position
-            )
-            self.database.query(DBCMD.ADD_STRUCT, struct)
-            return struct
-
+    # Interprets byte data, saves important features to the database, and returns a blueprint of the data
+    def try_catalog(self, data, chunk_size=1024):
+        # TODO: Support uneven number of bytes
+        # if len(data) % 2 == 1:
+        #     return []
+        
+        if len(self.database.query(DBCMD.GET_STRUCTS)) == 0:
+            structs = self.init_structs(data)
+        
+        # Find max sized struct we have fully discovered
+        byte_size = self.eval_database(1)
+        
+        # Determine if data exists fully in database
+        struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_DATA, data)
+        
+        if struct_existing:
+            return struct_existing.to_blueprint()
+        
+        # Finds the struct in the database which most closely relates to the given data
+        struct_related = self.get_related(data)
+        print("Found related struct of size:", len(struct_related.get_values()))
+        
+        structs = []
+        # Assuming database is populated, we use it for compression, prior to compression analysis 
+        if len(self.database.query(DBCMD.GET_STRUCTS)) > 0:
+            structs = self.database_compression(data, byte_size)
+            if len(structs) == 0:
+                structs = data
+        
+        final_struct = self.analyze_structs(structs)
+        
+        self.database.query(DBCMD.SAVE_DB)
+        
+        # Return array of bytes representing a blueprint
+        return final_struct.to_blueprint()
+    
+    # Initialize byte structures before analysis
+    def init_structs(self, data):
+        # Data variable is an array of byte, ex: [0, 1, 150, 255, ...]
+        struct_contextuals = []
+        
+        for i in range(256):
+            self.database.query(DBCMD.ADD_STRUCT, StructContextual(i, values=[i]))
+        for i, byte in enumerate(data):
+            struct = self.database.query(DBCMD.GET_STRUCT_BY_ID, byte)
+            struct.position = i
+            struct_contextuals.append(struct)
+        
+        return struct_contextuals
+    
     def eval_database(self, size):
         max = size
         num_structs = len(self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, size))
@@ -34,6 +70,22 @@ class Catalog:
                 max = max // 2
         
         return max
+
+    # Finds a struct in the database which most closely relates to the given data
+    def get_related(self, data):
+        # Iteratively split the data in half until we find a struct which has data that relates
+        struct_related = None
+        data_segmented = data
+        new_length = len(data)
+        while not struct_related:
+            data_segmented = self._segment_data(data, new_length)
+            for segment in data_segmented:
+                struct_related = self.database.query(DBCMD.GET_STRUCT_BY_DATA, segment)
+                if struct_related:
+                    break
+            new_length = new_length // 2
+        
+        return struct_related
 
     # Iteratively creates structs of a given size by pairing smaller structs
     # Used to find all possible structs of a given size
@@ -67,44 +119,6 @@ class Catalog:
 
             # Add new structs to the existing list
             existing.extend(new_structs)
-                
-
-    # Interprets byte data, saves important features to the database, and returns a blueprint of the data
-    def try_catalog(self, data, chunk_size=1024):
-        # TODO: Support uneven number of bytes
-        if len(data) % 2 == 1:
-            return []
-        
-        if len(self.database.query(DBCMD.GET_STRUCTS)) == 0:
-            structs = self.init_structs(data)
-        
-        # Find max sized struct we have fully discovered
-        byte_size = self.eval_database(1)
-            
-        # while byte_size < 2:
-        #     self.excavate_structs(byte_size * 2)
-        #     self.database.query(DBCMD.SAVE_DB)
-        #     # Update evaluation
-        #     byte_size = self.eval_database(byte_size)
-        
-        data_existing = self.database.query(DBCMD.GET_STRUCT_BY_DATA, data)
-        
-        if data_existing:
-            return data_existing.to_blueprint()
-        
-        structs = []
-        # Assuming database is populated, we use it for compression, prior to compression analysis 
-        if len(self.database.query(DBCMD.GET_STRUCTS)) > 0:
-            structs = self.database_compression(data, byte_size)
-            if len(structs) == 0:
-                structs = data
-        
-        final_struct = self.analyze_structs(structs)
-        
-        self.database.query(DBCMD.SAVE_DB)
-        
-        # Return array of bytes representing a blueprint
-        return final_struct.to_blueprint()
     
     def database_compression(self, data, compression_ratio):
         compressed_structs = []
@@ -130,20 +144,6 @@ class Catalog:
         compressed_structs.extend(result for result in results if result is not None)
             
         return compressed_structs
-    
-    # Initialize byte structures before analysis
-    def init_structs(self, data):
-        # Data variable is an array of byte, ex: [0, 1, 150, 255, ...]
-        struct_contextuals = []
-        
-        for i in range(256):
-            self.database.query(DBCMD.ADD_STRUCT, StructContextual(i, values=[i]))
-        for i, byte in enumerate(data):
-            struct = self.database.query(DBCMD.GET_STRUCT_BY_ID, byte)
-            struct.position = i
-            struct_contextuals.append(struct)
-        
-        return struct_contextuals
     
     # Multi-pass relational analysis of the bit structs
     # Returns a single struct with equal values to the given structs
@@ -184,6 +184,7 @@ class Catalog:
                     struct.position = len(new_structs)
                     new_structs.append(struct)
                     break
+        
         if len(new_structs) == 0:
             return structs
         
@@ -256,31 +257,56 @@ class Catalog:
 
         return new_structs
     
+    # Makes a struct from parameters and adds it to the database
+    def create_struct(self, substructs, values, base_struct, position):
+        with self.database_lock:
+            id = self.database.query(DBCMD.GET_NEW_ID, False)
+            struct = StructContextual(
+                id,
+                substructs,
+                values,
+                base_struct,
+                position=position
+            )
+            self.database.query(DBCMD.ADD_STRUCT, struct)
+            return struct
+    
     # Groups structs together by a given size
     def _group_structs(self, structs, size):
-        groups = []
-        for i in range(0, len(structs), size):
-            group = structs[i:i+size]
-            groups.append(group)
+        def worker(i):
+            return structs[i:i+size]
+
+        with ThreadPoolExecutor() as executor:
+            # Submit tasks to the executor and collect the results
+            futures = [executor.submit(worker, i) for i in range(0, len(structs), size)]
+            # Wait for all tasks to complete and collect the results
+            groups = [future.result() for future in futures]
+
         return groups
     
     def values_from_group(self, group):
-        values = []
-        for struct in group:
-            values.extend(struct.get_values())
-        
-        return values
+        def worker(struct):
+            return struct.get_values()
+
+        with ThreadPoolExecutor() as executor:
+            # Submit tasks to the executor and collect the results
+            futures = [executor.submit(worker, struct) for struct in group]
+            # Wait for all tasks to complete and collect the results
+            values = [future.result() for future in futures]
+
+        # Flatten the list of lists into a single list
+        return [value for sublist in values for value in sublist]
     
-    def _segment_data(self, data, num_bits):
-        # Split binary data into chunks of specified size
+    # Splits binary data into chunks of specified size
+    def _segment_data(self, data, num_vals):
         chunks = []
-        for i in range(0, len(data), num_bits):
+        for i in range(0, len(data), num_vals):
             chunk = []
             
-            if num_bits == 1:
+            if num_vals == 1:
                 chunk = [data[i]]
             else:
-                chunk = data[i:i+num_bits]
+                chunk = data[i:i+num_vals]
             
             chunks.append(chunk)
 

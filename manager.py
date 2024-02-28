@@ -20,26 +20,36 @@ class Manager:
     def __init__(self):
         if len(sys.argv) > 1:
             # Relative to working directory
-            file_path = sys.argv[1]
+            folder_path = sys.argv[1]
+            if not os.path.isdir(folder_path):
+                raise ValueError("Provided path is not a directory")
         else:
-            raise ValueError("No file path provided")
+            raise ValueError("No folder path provided")
         
         self.settings = Settings()
        
         data_dir = os.path.join(os.getcwd(), self.settings.data_directory)
         self.database = Database(data_dir)
-       
         self.catalog = Catalog(self.database, self.settings.auto_catalog)
         
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+            if os.path.isfile(file_path):
+                self.process_file(file_path, data_dir)
+
+    def process_file(self, file_path, data_dir):
         start_time = time.time()
-        
         file_data = read_bytes(file_path)
+        
+        if not file_data:
+            print(f"File not found or unreadable: {file_path}")
+            return
         
         if self.is_blueprint(file_data):
             file_data = self.database.query(DBCMD.GET_BLUEPRINT_BYTES, file_data[7:])
             bp_raw_path = os.path.join(data_dir, "blueprint.raw")
             write_bits(bp_raw_path, file_data)
-            print("Saved raw blueprint data to: ", bp_raw_path)
+            print(f"Saved raw blueprint data to: {bp_raw_path}")
             return
         
         file_data = [byte for byte in file_data]
@@ -49,13 +59,13 @@ class Manager:
             print("Failed to generate blueprint!")
             return
         
-        end_time = time.time()  # Record the end time
-        cataloging_duration = end_time - start_time  # Calculate the duration
+        end_time = time.time() # Record the end time
+        cataloging_duration = end_time - start_time # Calculate the duration
         
-        print(f"Catalogued file in: {int(cataloging_duration)} seconds.")
+        print(f"Catalogued file {file_path} in: {int(cataloging_duration)} seconds.")
         
         # Save blueprint to file
-        print("Saving blueprint to: ", os.path.join(data_dir, "blueprint.sbp"))
+        print(f"Saving blueprint to: {os.path.join(data_dir, 'blueprint.sbp')}")
         write_bytes(os.path.join(data_dir, "blueprint.sbp"), blueprint)
 
     def is_blueprint(self, bytes):
