@@ -19,23 +19,26 @@ from database import DBCMD, Database
 class Manager:
     def __init__(self):
         if len(sys.argv) > 1:
+            self.settings = Settings()
+            data_dir = os.path.join(os.getcwd(), self.settings.data_directory)
+            self.database = Database(data_dir)
+            self.catalog = Catalog(self.database, self.settings.auto_catalog)
+            
             # Relative to working directory
-            folder_path = sys.argv[1]
-            if not os.path.isdir(folder_path):
-                raise ValueError("Provided path is not a directory")
+            input_path = sys.argv[1]
+            if os.path.isdir(input_path):
+                folder_path = input_path
+                for filename in os.listdir(folder_path):
+                    file_path = os.path.join(folder_path, filename)
+                    if os.path.isfile(file_path):
+                        self.process_file(file_path, data_dir)
+            elif os.path.isfile(input_path):
+                self.process_file(input_path, data_dir)
+                return
+            else:
+                raise ValueError("Provided path is neither a directory nor a file")
         else:
-            raise ValueError("No folder path provided")
-        
-        self.settings = Settings()
-       
-        data_dir = os.path.join(os.getcwd(), self.settings.data_directory)
-        self.database = Database(data_dir)
-        self.catalog = Catalog(self.database, self.settings.auto_catalog)
-        
-        for filename in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(file_path):
-                self.process_file(file_path, data_dir)
+            raise ValueError("No input path provided")
 
     def process_file(self, file_path, data_dir):
         start_time = time.time()

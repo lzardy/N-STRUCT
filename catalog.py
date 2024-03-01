@@ -1,4 +1,5 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import concurrent.futures
 import threading
 from database import DBCMD, StructContextual
 
@@ -18,25 +19,26 @@ class Catalog:
         if len(self.database.query(DBCMD.GET_STRUCTS)) == 0:
             structs = self.init_structs(data)
         
-        # Find max sized struct we have fully discovered
-        byte_size = self.eval_database(1)
-        
         # Determine if data exists fully in database
         struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_DATA, data)
         
         if struct_existing:
             return struct_existing.to_blueprint()
         
-        # Finds the struct in the database which most closely relates to the given data
-        struct_related = self.get_related(data)
-        print("Found related struct of size:", len(struct_related.get_values()))
+        size_max = self.eval_database()
+        print("Max struct size:", size_max)
         
-        structs = []
-        # Assuming database is populated, we use it for compression, prior to compression analysis 
-        if len(self.database.query(DBCMD.GET_STRUCTS)) > 0:
-            structs = self.database_compression(data, byte_size)
-            if len(structs) == 0:
-                structs = data
+        if size_max > 1:
+            # Replaces the data with structs which most closely relate to the data
+            structs_related = []
+            structs_unordered = self.iterate_unrelated(data.copy(), 0, size_max)
+
+            # Sort by position variable
+            structs_unordered = sorted(structs_unordered, key=lambda x: x[1])
+            structs_related.extend([struct for struct, _, _ in structs_unordered])
+            structs = structs_related
+            
+            print("Found related structs:", len(structs_related))
         
         final_struct = self.analyze_structs(structs)
         
@@ -59,33 +61,77 @@ class Catalog:
         
         return struct_contextuals
     
-    def eval_database(self, size):
-        max = size
-        num_structs = len(self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, size))
-        while num_structs == 2 ** (8*max):
-            print("Max size fully discovered in database: ", max)
-            max *= 2
-            num_structs = len(self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, max))
-            if num_structs != 2 ** (8*max):
-                max = max // 2
-        
-        return max
+    # Finds the maximum sized struct present in the database
+    def eval_database(self):
+        max_size = 0
+        for struct in self.database.query(DBCMD.GET_STRUCTS):
+            values = len(struct.get_values())
+            if values > max_size:
+                max_size = values
+        return max_size
 
+    def iterate_unrelated(self, data, start_position, max_size=1):
+        if len(data) == 0:
+            return None
+
+        unordered_structs = []
+        current_position = start_position
+
+        while len(data) > 0:
+            struct_related, position, length = self.get_related(data, max_size)
+            unordered_structs.append((struct_related, current_position + position, length))
+            data = data[position + length:]
+            current_position += position + length
+
+        return unordered_structs
+    
     # Finds a struct in the database which most closely relates to the given data
-    def get_related(self, data):
+    def get_related(self, data, max_size=1):
         # Iteratively split the data in half until we find a struct which has data that relates
         struct_related = None
         data_segmented = data
-        new_length = len(data)
+        if max_size < len(data):
+            new_length = max_size
+        else:
+            new_length = len(data)
         while not struct_related:
+            known_structs = self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, new_length)
+            if len(known_structs) == 0:
+                new_length -= 1
+                continue
+            
+            if new_length == 1:
+                for byte in data:
+                    struct_related = self.database.query(DBCMD.GET_STRUCT_BY_ID, byte)
+                    if struct_related:
+                        break
+            
             data_segmented = self._segment_data(data, new_length)
+            position = 0
             for segment in data_segmented:
-                struct_related = self.database.query(DBCMD.GET_STRUCT_BY_DATA, segment)
+                if len(segment) < new_length:
+                    continue
+                struct_related = self.struct_by_data(known_structs, segment)
                 if struct_related:
                     break
-            new_length = new_length // 2
+                position += len(segment)
+            if new_length > 1:
+                new_length -= 1
+            else:
+                break
         
-        return struct_related
+        return struct_related, position, new_length
+
+    def struct_by_data(self, structs, data):
+        for struct in structs:
+            struct_values = []
+            if struct.values:
+                struct_values = struct.values
+            else:
+                struct_values = struct.get_values()
+            if struct and struct_values == data:
+                return struct.copy()
+        return None
 
     # Iteratively creates structs of a given size by pairing smaller structs
     # Used to find all possible structs of a given size
@@ -166,17 +212,36 @@ class Catalog:
         
         last_structs = structs.copy()
         for i in range(factor):
-            last_structs = self.compress_structs(last_structs)
+            last_structs = self.compress_structs(last_structs, 2)
+            if len(last_structs) == 1:
+                break
+            
+        last_structs = structs.copy()
+        for i in range(factor):
+            last_structs = self.compress_structs(last_structs, 3)
+            if len(last_structs) == 1:
+                break
+        
+        last_structs = structs.copy()
+        for i in range(factor):
+            j = 2
+            while j != 4:
+                last_structs = self.compress_structs(last_structs, j)
+                j += 1
+                if len(last_structs) == 1:
+                    break
+            if len(last_structs) == 1:
+                break
         
         return last_structs
     
     # Groups structs by 2 and replaces those groups with a single struct
-    def compress_structs(self, structs):
-        uniques = self.find_uniques_grouped(structs, 2)
+    def compress_structs(self, structs, group_size=2):
+        uniques = self.find_uniques_grouped(structs, group_size)
         unique_structs = self.structs_from_structs(uniques)
         
         new_structs = []
-        struct_groups = self._group_structs(structs, 2)
+        struct_groups = self._group_structs(structs, group_size)
         for group in struct_groups:
             values = self.values_from_group(group)
             for struct in unique_structs:
