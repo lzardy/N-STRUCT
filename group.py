@@ -1,6 +1,8 @@
 import argparse
+import os
 import time
 import file_io
+from file_io import write_bits
 
 parser = argparse.ArgumentParser()
 parser.add_argument('file_path', type=str, help='The path to the file to read')
@@ -40,19 +42,44 @@ def simplify_bits(bits, ones=False, count_offset=0):
         bits_simplified.append(target_bit)
     return bits_simplified, max_count
 
-bits_simplified_first, max_count = simplify_bits(bits)
+s_bits_zeros, max_zeros = simplify_bits(bits)
 print("Time elapsed: ", time.time() - last_time)
-print("bits_simplified_first: ", len(bits_simplified_first))
-print("bits_simplified_first: ", bits_simplified_first[-10:])
-print("max_count: ", max_count)
+print("s_bits_zeros: ", len(s_bits_zeros))
+print("s_bits_zeros: ", s_bits_zeros[-10:])
+print("max_zeros: ", max_zeros)
 
 # Get current timestamp
 last_time = time.time()
 
-bits_simplified_second, max_count = simplify_bits(bits_simplified_first, True, max_count)
+s_bits_ones, max_ones = simplify_bits(s_bits_zeros, True, max_zeros)
 print("Time elapsed: ", time.time() - last_time)
-print("bits_simplified_second: ", len(bits_simplified_second))
-print("bits_simplified_second: ", bits_simplified_second[-10:])
+print("s_bits_ones: ", len(s_bits_ones))
+print("s_bits_ones: ", s_bits_ones[-10:])
+
+current_directory = os.getcwd()
+file_path = os.path.join(current_directory, "s_bits_ones")
+
+# Any value between 2 and max_zeros is a 0, any value between max_zeros and max_ones is a 1
+def s_bits_to_bits(s_bits, max_zeros):
+    bits = []
+    for val in s_bits:
+        if val == 0:
+            bits.append(0)
+            continue
+        if val == 1:
+            bits.append(1)
+            continue
+        if val <= max_zeros:
+            for _ in range(val):
+                bits.append(0)
+        else:
+            for _ in range(val - max_zeros):
+                bits.append(1)
+    return bits
+
+write_bits(file_path, s_bits_to_bits(s_bits_ones, max_zeros))
+
+# TODO: Save s_bits to file directly instead of converting to bits (without increasing file size)
 
 # Splits an array into chunks of specified size
 def segment_array(data, num_vals):
