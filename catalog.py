@@ -10,12 +10,29 @@ class Catalog:
         self.auto = auto
         self.database_lock = threading.Lock()
 
-    # Interprets byte data, saves important features to the database, and returns a blueprint of the data
     def try_catalog(self, data, chunk_size=1024):
-        # TODO: Support uneven number of bytes
-        # if len(data) % 2 == 1:
-        #     return []
-        
+        """
+        Interprets byte data, saves important features to the database, and returns the bytes for a blueprint of the data.
+
+        Args:
+            data (bytes): The byte data to be interpreted.
+            chunk_size (int, optional): The size of the chunks to be processed. Defaults to 1024.
+
+        Returns:
+            bytes: An array of bytes representing a blueprint of the data.
+
+        Raises:
+            None
+
+        Notes:
+            - If the database is empty, the function initializes the structs using the provided data.
+            - The function determines if the data exists fully in the database. If it does, the function returns the blueprint of the existing struct.
+            - The function evaluates the database and determines the maximum struct size.
+            - If the maximum struct size is greater than 1, the function replaces the data with structs that most closely relate to the data.
+                - The function sorts the structs by their positions in an array and returns the related structs.
+                - The function analyzes the structs and returns the final struct.
+            - The function saves the database and returns the bytes of the final struct which will be the blueprint of the data.
+        """
         if len(self.database.query(DBCMD.GET_STRUCTS)) == 0:
             structs = self.init_structs(data)
         
@@ -33,7 +50,7 @@ class Catalog:
             structs_related = []
             structs_unordered = self.iterate_unrelated(data.copy(), 0, size_max)
 
-            # Sort by position variable
+            # Sort by position
             structs_unordered = sorted(structs_unordered, key=lambda x: x[1])
             structs_related.extend([struct for struct, _, _ in structs_unordered])
             structs = structs_related

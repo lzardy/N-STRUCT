@@ -39,18 +39,37 @@ class Manager:
                 raise ValueError("Provided path is neither a directory nor a file")
         else:
             raise ValueError("No input path provided")
-
+        
+    
     def process_file(self, file_path, data_dir):
+        """
+        Process a file by reading its bytes, checking if it is a blueprint, and cataloging it.
+        
+        Args:
+            file_path (str): The path to the file to be processed.
+            data_dir (str): The directory where the processed data will be saved.
+        
+        Returns:
+            None
+        
+        Prints:
+            - If the file is not found or unreadable, it prints a message with the file path.
+            - If the file is a blueprint, it saves the raw blueprint data to the specified directory and prints a message with the file path.
+            - If the file is not a blueprint, it generates a blueprint using the catalog, prints the duration of the cataloging process, and saves it to the specified directory.
+            - If the blueprint generation fails, it prints a failure message.
+        """
         start_time = time.time()
         file_data = read_bytes(file_path)
+        file_name = os.path.basename(file_path) + ".sbp"
         
         if not file_data:
             print(f"File not found or unreadable: {file_path}")
             return
         
         if self.is_blueprint(file_data):
-            file_data = self.database.query(DBCMD.GET_BLUEPRINT_BYTES, file_data[7:])
-            bp_raw_path = os.path.join(data_dir, "blueprint.raw")
+            # TODO: If blueprint does not already exist in the database, add it
+            file_data = self.database.query(DBCMD.GET_BLUEPRINT_BYTES, file_data)
+            bp_raw_path = os.path.join(data_dir, file_name)
             write_bits(bp_raw_path, file_data)
             print(f"Saved raw blueprint data to: {bp_raw_path}")
             return
@@ -68,10 +87,16 @@ class Manager:
         print(f"Catalogued file {file_path} in: {int(cataloging_duration)} seconds.")
         
         # Save blueprint to file
-        print(f"Saving blueprint to: {os.path.join(data_dir, 'blueprint.sbp')}")
-        write_bytes(os.path.join(data_dir, "blueprint.sbp"), blueprint)
+        print(f"Saving blueprint to: {os.path.join(data_dir, file_name)}")
+        write_bytes(os.path.join(data_dir, file_name), blueprint)
 
     def is_blueprint(self, bytes):
+        """
+        Attempts to match "SBP" at the beginning of the input bytes.
+        
+        :param bytes: The input bytes to check if they match "SBP"
+        :return: True if the first 3 bytes of the input decode to "SBP", False otherwise
+        """
         # Match "SBP"
         try:
             sbp_str = bytes[:3].decode('utf-8')

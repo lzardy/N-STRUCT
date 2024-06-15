@@ -502,8 +502,9 @@ class Database():
     
     # Returns the byte data of the struct referenced by ID in a blueprint
     def __getBlueprintBytes(self, bytes):
+        data = bytes[7:]
         # Get all substruct IDs
-        struct_id = int.from_bytes(bytes[:4])
+        struct_id = int.from_bytes(data)
         struct = self.struct_db.structs[struct_id]
         return struct.get_values()
     

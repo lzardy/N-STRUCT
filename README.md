@@ -8,7 +8,7 @@ This project is the foundation for a suite of tools, using the abstractions save
 # Features
 
 ## Core
-These features are required, and together they accomplish the main goal.
+These features are required, and together they accomplish the goal of minimizing redundancy.
 
 - **File I/O**: Allows reading and writing string and byte data to disk.
 - **Database**: Utilizes a structured database system to store and manage data on the disk. The information in the database is saved as Structure Database Files (SDB).
@@ -40,7 +40,7 @@ To do so, we need a rigorously defined set of parameters which define what a "re
 3. **Relativity** - Where the data point is with respect to other data points, including data points with the same appearance
 4. **Others?** - More than likely, these will all be contextual
 
-The first three parameters are simple and general and (as of writing) not enough time has been spent to find other obviously simple parameters (yes, this is a human gradient descent prior).
+The first three parameters are simple and general and (as of writing) not enough time has been spent to find other obviously simple parameters (this is effectively a human gradient descent prior).
 
 
 #### **Blueprinting**
@@ -54,7 +54,7 @@ The tool has built-in error handling to catch and report errors during execution
 #### **Settings**
 The tool can load and save settings from an .ini file.
 #### **Operations**
-The tool can perform operations on data in memory. Currently supported operations include refining, simplifying, and converting data to other types.
+The tool should support operations on data in memory. Currently, there are no operations implemented.
 
 ## Usage
 To use N-STRUCT, you can run these commands:
@@ -68,3 +68,7 @@ python manager.py <file path>
 ```
 
 For more detailed usage instructions (developers), please refer to the individual documentation for each class.
+
+## TODO
+- Support refine, simplify, and convert operations.
+- Segment the codebase to match the cataloguing process.
