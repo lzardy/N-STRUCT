@@ -44,8 +44,8 @@ def simplify_bits(bits, ones=False, count_offset=0):
 
 s_bits_zeros, max_zeros = simplify_bits(bits)
 print("Time elapsed: ", time.time() - last_time)
-print("s_bits_zeros: ", len(s_bits_zeros))
-print("s_bits_zeros: ", s_bits_zeros[-10:])
+print("s_bits_zeros len: ", len(s_bits_zeros))
+print("s_bits_zeros (slice 0-10): ", s_bits_zeros[-10:])
 print("max_zeros: ", max_zeros)
 
 # Get current timestamp
@@ -53,8 +53,8 @@ last_time = time.time()
 
 s_bits_ones, max_ones = simplify_bits(s_bits_zeros, True, max_zeros)
 print("Time elapsed: ", time.time() - last_time)
-print("s_bits_ones: ", len(s_bits_ones))
-print("s_bits_ones: ", s_bits_ones[-10:])
+print("s_bits_ones len: ", len(s_bits_ones))
+print("s_bits_ones (slice 0-10): ", s_bits_ones[-10:])
 
 current_directory = os.getcwd()
 file_path = os.path.join(current_directory, "s_bits_ones")
