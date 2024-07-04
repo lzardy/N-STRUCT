@@ -12,14 +12,14 @@ class Catalog:
 
     def try_catalog(self, data, chunk_size=1024):
         """
-        Interprets byte data, saves important features to the database, and returns the bytes for a blueprint of the data.
+        Interprets bit data, saves important features to the database, and returns the bits for a blueprint of the data.
 
         Args:
-            data (bytes): The byte data to be interpreted.
+            data (bits): The bit data to be interpreted.
             chunk_size (int, optional): The size of the chunks to be processed. Defaults to 1024.
 
         Returns:
-            bytes: An array of bytes representing a blueprint of the data.
+            bits: An array of bits representing a blueprint of the data.
 
         Raises:
             None
@@ -31,7 +31,7 @@ class Catalog:
             - If the maximum struct size is greater than 1, the function replaces the data with structs that most closely relate to the data.
                 - The function sorts the structs by their positions in an array and returns the related structs.
                 - The function analyzes the structs and returns the final struct.
-            - The function saves the database and returns the bytes of the final struct which will be the blueprint of the data.
+            - The function saves the database and returns the bits of the final struct which will be the blueprint of the data.
         """
         if len(self.database.query(DBCMD.GET_STRUCTS)) == 0:
             structs = self.init_structs(data)
@@ -42,41 +42,81 @@ class Catalog:
         if struct_existing:
             return struct_existing.to_blueprint()
         
-        size_max = self.eval_database()
-        print("Max struct size:", size_max)
-        
-        if size_max > 1:
-            # Replaces the data with structs which most closely relate to the data
-            structs_related = []
-            structs_unordered = self.iterate_unrelated(data.copy(), 0, size_max)
-
-            # Sort by position
-            structs_unordered = sorted(structs_unordered, key=lambda x: x[1])
-            structs_related.extend([struct for struct, _, _ in structs_unordered])
-            structs = structs_related
-            
-            print("Found related structs:", len(structs_related))
-        
-        final_struct = self.analyze_structs(structs)
-        
+        # Add struct
+        substructs = self.convert_to_substructs(data)
+        struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), substructs=substructs)
+        self.database.query(DBCMD.ADD_STRUCT, struct)
         self.database.query(DBCMD.SAVE_DB)
         
         # Return array of bytes representing a blueprint
-        return final_struct.to_blueprint()
+        return struct.to_blueprint()
     
     # Initialize byte structures before analysis
     def init_structs(self, data):
-        # Data variable is an array of byte, ex: [0, 1, 150, 255, ...]
+        # Data variable is an array of bits, ex: [0, 1, 1, 1, 0, 0, ...]
         struct_contextuals = []
         
         for i in range(256):
-            self.database.query(DBCMD.ADD_STRUCT, StructContextual(i, values=[i]))
-        for i, byte in enumerate(data):
-            struct = self.database.query(DBCMD.GET_STRUCT_BY_ID, byte)
-            struct.position = i
+            if i == 0:
+                struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), values=[0])
+                self.database.query(DBCMD.ADD_STRUCT, struct)
+                struct_contextuals.append(struct)
+                continue
+            if i == 1:
+                struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), values=[1])
+                self.database.query(DBCMD.ADD_STRUCT, struct)
+                struct_contextuals.append(struct)
+                continue
+            
+            # Convert i to an array of bits
+            bits = [int(x) for x in bin(i)[2:]]
+            print("init struct bits: ", bits)
+            
+            # Add struct
+            substructs = self.convert_to_substructs(bits)
+            struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), substructs=substructs)
+            self.database.query(DBCMD.ADD_STRUCT, struct)
             struct_contextuals.append(struct)
         
         return struct_contextuals
+    
+    def convert_to_substructs(self, data):
+        substruct_ids = data.copy()
+        # Loop from largest struct to smallest
+        for struct in self.database.query(DBCMD.GET_STRUCTS)[::-1]:
+            print("struct values: ", struct.get_values())
+            # Skip structs larger than the input data
+            if len(struct.get_values()) > len(data):
+                continue
+            else:
+                substruct_ids = self.struct_overlap(struct, substruct_ids)
+        
+        # Add struct
+        substructs = self.structs_by_ids(substruct_ids)
+        return substructs
+    
+    # Checks for overlap between a given struct and the given bit data and replaces it with the struct's id
+    def struct_overlap(self, struct, data):
+        length = len(struct.get_values())
+        new_data = []
+        pos = 0
+        
+        while (pos < len(data)):
+            if data[pos:pos + length] == struct.get_values():
+                overlap = True
+                new_data.append(struct.id)
+                pos += length
+            else:
+                new_data.append(data[pos])
+                pos += 1
+                
+        return new_data
+    
+    def structs_by_ids(self, ids):
+        structs = []
+        for id in ids:
+            structs.append(self.database.query(DBCMD.GET_STRUCT_BY_ID, id))
+        return structs
     
     # Finds the maximum sized struct present in the database
     def eval_database(self):

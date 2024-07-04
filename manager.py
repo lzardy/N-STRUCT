@@ -74,7 +74,7 @@ class Manager:
             print(f"Saved raw blueprint data to: {bp_raw_path}")
             return
         
-        file_data = [byte for byte in file_data]
+        file_data = read_bits(file_path)
         blueprint = self.catalog.try_catalog(file_data)
         
         if not blueprint:
