@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import concurrent.futures
+from itertools import islice
 import threading
+import time
 from database import DBCMD, StructContextual
 
 class Catalog:
@@ -8,7 +9,7 @@ class Catalog:
         self.database = database
         # TODO: Implement by checking file system for new files in data directory
         self.auto = auto
-        self.database_lock = threading.Lock()
+        self.struct_cache = {}
 
     def try_catalog(self, data, chunk_size=1024):
         """
@@ -36,35 +37,80 @@ class Catalog:
         if len(self.database.query(DBCMD.GET_STRUCTS)) == 0:
             structs = self.init_structs(data)
         
-        # Determine if data exists fully in database
-        struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_DATA, data)
-        
-        if struct_existing:
-            return struct_existing.to_blueprint()
-        
-        # Add struct
+        # convert data to known substructs
+        start_time = time.time()
         substructs = self.convert_to_substructs(data)
-        struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), substructs=substructs)
-        self.database.query(DBCMD.ADD_STRUCT, struct)
+        print("Conversion time:", time.time() - start_time)
+        # compress all substructs into one struct
+        start_time = time.time()
+        self.struct_cache = {}
+        struct = self.struct_from_substructs(substructs)
+        print("Reconstruction time: ", time.time() - start_time)
+        # add & save to database
+        struct = self.database.query(DBCMD.ADD_STRUCT, struct)
         self.database.query(DBCMD.SAVE_DB)
         
-        # Return array of bytes representing a blueprint
+        # Return array of bytes representing a blueprint of the data
         return struct.to_blueprint()
     
-    # Initialize byte structures before analysis
+    # Creates structs from groups of substructs of specified size
+    def group_substructs(self, substructs, group_size):
+        # Slightly faster than simple slicing
+        def grouper(iterable, n):
+            it = iter(iterable)
+            while True:
+                chunk = list(islice(it, n))
+                if not chunk:
+                    break
+                yield chunk
+
+        new_structs = []
+        for group in grouper(substructs, group_size):
+            struct = StructContextual(substructs=group)
+            struct = self.database.query(DBCMD.ADD_STRUCT, struct)
+            new_structs.append(struct)
+        
+        return new_structs
+    
+    # Recursively creates new structs from pairs of integers (struct ids)
+    # Returns a single struct with two substructs to represent the parent in the tree of substructs
+    def struct_from_substructs(self, substructs):
+        if len(substructs) == 1:
+            return substructs[0]
+        
+        while len(substructs) > 1:
+            print("substructs len:", len(substructs))
+            
+            last_substruct = None
+            if len(substructs) % 2 != 0:
+                last_substruct = substructs.pop()
+            
+            substructs = self.group_substructs(substructs, 2)
+            
+            if last_substruct:
+                substructs.append(last_substruct)
+                
+        return substructs[0]
+    
+    # Makes a struct from parameters and adds it to the database
+    def create_struct(self, substructs):
+        struct = StructContextual(substructs=substructs)
+        return self.database.query(DBCMD.ADD_STRUCT, struct)
+    
+    # Initialize byte (0-255) structures before analysis
     def init_structs(self, data):
         # Data variable is an array of bits, ex: [0, 1, 1, 1, 0, 0, ...]
         struct_contextuals = []
         
         for i in range(256):
             if i == 0:
-                struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), values=[0])
-                self.database.query(DBCMD.ADD_STRUCT, struct)
+                struct = StructContextual(values=[0])
+                struct = self.database.query(DBCMD.ADD_STRUCT, struct)
                 struct_contextuals.append(struct)
                 continue
             if i == 1:
-                struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), values=[1])
-                self.database.query(DBCMD.ADD_STRUCT, struct)
+                struct = StructContextual(values=[1])
+                struct = self.database.query(DBCMD.ADD_STRUCT, struct)
                 struct_contextuals.append(struct)
                 continue
             
@@ -74,111 +120,68 @@ class Catalog:
             
             # Add struct
             substructs = self.convert_to_substructs(bits)
-            struct = StructContextual(self.database.query(DBCMD.GET_NEW_ID, False), substructs=substructs)
-            self.database.query(DBCMD.ADD_STRUCT, struct)
+            struct = StructContextual(substructs=substructs)
+            struct = self.database.query(DBCMD.ADD_STRUCT, struct)
             struct_contextuals.append(struct)
         
         return struct_contextuals
     
+    # Converts raw bit data into substructs using a binary search
     def convert_to_substructs(self, data):
         substruct_ids = data.copy()
-        # Loop from largest struct to smallest
-        for struct in self.database.query(DBCMD.GET_STRUCTS)[::-1]:
-            print("struct values: ", struct.get_values())
+        check_structs = self.database.query(DBCMD.GET_STRUCTS)[255::-1]
+
+        # Sort the structs based on their values
+        #check_structs.sort(key=lambda x: x.get_values())
+
+        for struct in check_structs:
             # Skip structs larger than the input data
             if len(struct.get_values()) > len(data):
                 continue
             else:
                 substruct_ids = self.struct_overlap(struct, substruct_ids)
-        
-        # Add struct
-        substructs = self.structs_by_ids(substruct_ids)
-        return substructs
+            
+            if len(substruct_ids) <= 2:
+                break
+
+        # Get structs from ids
+        return self.structs_by_ids(substruct_ids)
     
-    # Checks for overlap between a given struct and the given bit data and replaces it with the struct's id
+    # Finds all overlaps between a given struct's values and the given bit data and replaces the bit data with the struct's id
     def struct_overlap(self, struct, data):
-        length = len(struct.get_values())
+        cache_key = (struct.id, tuple(data))
+        if cache_key in self.struct_cache:
+            return self.struct_cache[cache_key]
+        result = self._struct_overlap(struct,data)
+        self.struct_cache[cache_key] = result
+        return result
+    
+    def _struct_overlap(self, struct, data):
+        values = struct.get_values()
+        length = len(values)
         new_data = []
-        pos = 0
-        
-        while (pos < len(data)):
-            if data[pos:pos + length] == struct.get_values():
-                overlap = True
+        i = 0
+        while i < len(data):
+            # Must match length, first value, and then all values
+            if (i <= len(data) - length
+                and data[i] == values[0]
+                and data[i:i+length] == values):
                 new_data.append(struct.id)
-                pos += length
+                i += length
+            # Slide forward if no match
             else:
-                new_data.append(data[pos])
-                pos += 1
-                
+                new_data.append(data[i])
+                i += 1
         return new_data
     
+    # Gets all structs in the database which match the provided ids
     def structs_by_ids(self, ids):
         structs = []
         for id in ids:
             structs.append(self.database.query(DBCMD.GET_STRUCT_BY_ID, id))
         return structs
-    
-    # Finds the maximum sized struct present in the database
-    def eval_database(self):
-        max_size = 0
-        for struct in self.database.query(DBCMD.GET_STRUCTS):
-            values = len(struct.get_values())
-            if values > max_size:
-                max_size = values
-        return max_size
 
-    def iterate_unrelated(self, data, start_position, max_size=1):
-        if len(data) == 0:
-            return None
-
-        unordered_structs = []
-        current_position = start_position
-
-        while len(data) > 0:
-            struct_related, position, length = self.get_related(data, max_size)
-            unordered_structs.append((struct_related, current_position + position, length))
-            data = data[position + length:]
-            current_position += position + length
-
-        return unordered_structs
-    
-    # Finds a struct in the database which most closely relates to the given data
-    def get_related(self, data, max_size=1):
-        # Iteratively split the data in half until we find a struct which has data that relates
-        struct_related = None
-        data_segmented = data
-        if max_size < len(data):
-            new_length = max_size
-        else:
-            new_length = len(data)
-        while not struct_related:
-            known_structs = self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, new_length)
-            if len(known_structs) == 0:
-                new_length -= 1
-                continue
-            
-            if new_length == 1:
-                for byte in data:
-                    struct_related = self.database.query(DBCMD.GET_STRUCT_BY_ID, byte)
-                    if struct_related:
-                        break
-            
-            data_segmented = self._segment_data(data, new_length)
-            position = 0
-            for segment in data_segmented:
-                if len(segment) < new_length:
-                    continue
-                struct_related = self.struct_by_data(known_structs, segment)
-                if struct_related:
-                    break
-                position += len(segment)
-            if new_length > 1:
-                new_length -= 1
-            else:
-                break
-        
-        return struct_related, position, new_length
-
+    # Gets the struct which matches the given data
     def struct_by_data(self, structs, data):
         for struct in structs:
             struct_values = []
@@ -189,237 +192,8 @@ class Catalog:
             if struct and struct_values == data:
                 return struct.copy()
         return None
-
-    # Iteratively creates structs of a given size by pairing smaller structs
-    # Used to find all possible structs of a given size
-    def excavate_structs(self, size):
-        existing = self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, size)
-        substructs = self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, size // 2)
-        
-        def worker(first, second):
-            skip = False
-            for struct in existing:
-                if (struct.substructs[0].id == first.id and
-                    struct.substructs[1].id == second.id):
-                    # Skip
-                    skip = True
-                    break
-            if skip:
-                return None
-            # Otherwise, add it to the database
-            return self.create_struct(
-                [first, second],
-                None,
-                None,
-                0
-            )
-        
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor and collect the results
-            futures = [executor.submit(worker, first, second) for first in substructs for second in substructs]
-            # Wait for all tasks to complete and collect the results
-            new_structs = [future.result() for future in futures if future.result() is not None]
-
-            # Add new structs to the existing list
-            existing.extend(new_structs)
     
-    def database_compression(self, data, compression_ratio):
-        compressed_structs = []
-        
-        # Initial compression, mainly to convert from array of bytes to array of structs
-        existing_structs = self.database.query(DBCMD.GET_STRUCTS_BY_LENGTH, compression_ratio)
-        segmented_data = self._segment_data(data, compression_ratio)
-        
-        def worker(segment):
-            for struct in existing_structs:
-                values = struct.get_values()
-                if segment == values:
-                    return struct
-            return None
-
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor and collect the results
-            futures = [executor.submit(worker, segment) for segment in segmented_data]
-            # Wait for all tasks to complete and collect the results
-            results = [future.result() for future in futures]
-
-        # Filter out None results and add to compressed_structs
-        compressed_structs.extend(result for result in results if result is not None)
-            
-        return compressed_structs
-    
-    # Multi-pass relational analysis of the bit structs
-    # Returns a single struct with equal values to the given structs
-    def analyze_structs(self, structs):
-        # TODO: Curate compression to get more meaningful abstractions? File-type specific stuff?
-        # Compresses structs
-        return self.factor_compression(structs, -1)[0]
-    
-    # Iteratively replaces groups of structs with a single struct
-    # Compression rate is (2 ^ factor)
-    def factor_compression(self, structs, factor=2):
-        if factor == 0:
-            return structs
-        if factor < 0:
-            factor = 1
-            max_bits = len(structs)
-            # Gets maximum number of times we can compress
-            while (2 ** factor) < max_bits:
-                factor += 1
-        
-        last_structs = structs.copy()
-        for i in range(factor):
-            last_structs = self.compress_structs(last_structs, 2)
-            if len(last_structs) == 1:
-                break
-            
-        last_structs = structs.copy()
-        for i in range(factor):
-            last_structs = self.compress_structs(last_structs, 3)
-            if len(last_structs) == 1:
-                break
-        
-        last_structs = structs.copy()
-        for i in range(factor):
-            j = 2
-            while j != 4:
-                last_structs = self.compress_structs(last_structs, j)
-                j += 1
-                if len(last_structs) == 1:
-                    break
-            if len(last_structs) == 1:
-                break
-        
-        return last_structs
-    
-    # Groups structs by 2 and replaces those groups with a single struct
-    def compress_structs(self, structs, group_size=2):
-        uniques = self.find_uniques_grouped(structs, group_size)
-        unique_structs = self.structs_from_structs(uniques)
-        
-        new_structs = []
-        struct_groups = self._group_structs(structs, group_size)
-        for group in struct_groups:
-            values = self.values_from_group(group)
-            for struct in unique_structs:
-                if struct.get_values() == values:
-                    struct.position = len(new_structs)
-                    new_structs.append(struct)
-                    break
-        
-        if len(new_structs) == 0:
-            return structs
-        
-        return new_structs
-    
-    # Scans structs for duplicate groups of a given size and assigns them to classes
-    def find_uniques_grouped(self, structs, size):
-        classes = []
-        group_structs = self._group_structs(structs, size)
-        
-        def worker(group):
-            if len(classes) >  0:
-                exists = False
-                for class_groups in classes:
-                    class_group_vals = []
-                    for struct in class_groups[0]:
-                        class_group_vals.extend(struct.get_values())
-                    group_vals = []
-                    for struct in group:
-                        group_vals.extend(struct.get_values())
-                    
-                    if class_group_vals == group_vals:
-                        exists = True
-                        break
-                if exists:
-                    return None
-            return group
-
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor and collect the results
-            futures = [executor.submit(worker, group) for group in group_structs]
-            # Wait for all tasks to complete and collect the results
-            results = [future.result() for future in futures if future.result() is not None]
-
-        for result in results:
-            classes.append([result])
-
-        return classes
-    
-    def structs_from_structs(self, structs):
-        def worker(group):
-            i, group = group
-            substructs = group[0]
-            struct_existing = self.database.query(DBCMD.GET_STRUCT_BY_SUBSTRUCTS, substructs, False)
-            if struct_existing:
-                struct_existing.position = i
-                return struct_existing
-            else:
-                return self.create_struct(
-                    substructs,
-                    None,
-                    substructs[0].base_struct,
-                    position=i
-                )
-
-        with ThreadPoolExecutor() as executor:
-            # Prepare the data for the executor
-            data_for_executor = [(i, group) for i, group in enumerate(structs)]
-            # Submit tasks to the executor and collect the results
-            futures = [executor.submit(worker, group) for group in data_for_executor]
-            # Wait for all tasks to complete and collect the results
-            new_structs = [future.result() for future in futures]
-
-        # TODO Figure out if we can use relations to be make this more efficient
-        #for struct in new_structs:
-        #    struct.update_context(new_structs)
-        # Separate because it requires general relations to be finished first
-        #for struct in new_structs:
-        #    struct.update_specific_relations()
-
-        return new_structs
-    
-    # Makes a struct from parameters and adds it to the database
-    def create_struct(self, substructs, values, base_struct, position):
-        with self.database_lock:
-            id = self.database.query(DBCMD.GET_NEW_ID, False)
-            struct = StructContextual(
-                id,
-                substructs,
-                values,
-                base_struct,
-                position=position
-            )
-            self.database.query(DBCMD.ADD_STRUCT, struct)
-            return struct
-    
-    # Groups structs together by a given size
-    def _group_structs(self, structs, size):
-        def worker(i):
-            return structs[i:i+size]
-
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor and collect the results
-            futures = [executor.submit(worker, i) for i in range(0, len(structs), size)]
-            # Wait for all tasks to complete and collect the results
-            groups = [future.result() for future in futures]
-
-        return groups
-    
-    def values_from_group(self, group):
-        def worker(struct):
-            return struct.get_values()
-
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor and collect the results
-            futures = [executor.submit(worker, struct) for struct in group]
-            # Wait for all tasks to complete and collect the results
-            values = [future.result() for future in futures]
-
-        # Flatten the list of lists into a single list
-        return [value for sublist in values for value in sublist]
-    
-    # Splits binary data into chunks of specified size
+    # Splits a given data array into chunks of specified size
     def _segment_data(self, data, num_vals):
         chunks = []
         for i in range(0, len(data), num_vals):

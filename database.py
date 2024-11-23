@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from enum import Enum, IntFlag
 import os
 from re import S
@@ -273,9 +274,28 @@ class StructPointer:
         data.append(self.byteIndex)
         return to_bytes(data)
 
+# Caching for quick lookup of structs in the database
+class LRUCache:
+    def __init__(self, capacity):
+        self.cache = OrderedDict()
+        self.capacity = capacity
+    
+    def get(self, key):
+        if key not in self.cache:
+            return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+    
+    def put(self, key, value):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        self.cache[key] = value
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+
 # The Struct Database File containing all database information
 class StructDatabase:
-    def __init__(self, ptrs=None, structs=None):
+    def __init__(self, ptrs=None, structs=None, cache_size=1000):
         if ptrs and structs:
             self.ptrs = ptrs
             self.structs = structs
@@ -285,34 +305,51 @@ class StructDatabase:
             # Contains struct objects
             # TODO: Implement queuing when adding structs and a temporary struct cache for commonly used structs during runtime and cataloging
             self.structs = []
+        
+        self.substruct_index = {} # Maps substructs to parent struct
+        self.cache = LRUCache(cache_size)
     
     # Get the struct that has the given data
     def get_struct(self, values):
         for struct in self.structs:
-            struct_values = []
-            if struct.values:
-                struct_values = struct.values
-            else:
-                struct_values = struct.get_values()
-            if struct and struct_values == values:
+            if struct and struct.get_values() == values:
                 return struct.copy()
         return None
     
-    # Get the struct that has the given substructs
+    def add_to_index(self, struct):
+        substruct_key = frozenset(struct.get_substructs(by_id=True))
+        if substruct_key not in self.substruct_index:
+            self.substruct_index[substruct_key] = []
+        self.substruct_index[substruct_key].append(struct)
+        
+    def get_from_index(self, substructs):
+        substruct_key = frozenset(substructs)
+        return self.substruct_index.get(substruct_key, [])
+    
+    # Using the database cachce, gets the struct that has the given substructs
     def get_substructs_owner(self, substructs, ids=False):
-        substruct_ids = []
+        cache_key = frozenset(substructs if ids else [struct.id for struct in substructs])
         
-        if ids:
-            substruct_ids = substructs
-        else:
-            for struct in substructs:
-                substruct_ids.append(struct.id)
+        cached_result = self.cache.get(cache_key)
+        if cached_result:
+            return cached_result
         
-        for struct in self.structs:
-            struct_ids = struct.get_substructs(False, True)
+        result = self._get_substructs_owner_impl(substructs, ids)
+        if result:
+            self.cache.put(cache_key, result)
+            
+        return result
+    
+    # Get the struct that has the given substructs
+    def _get_substructs_owner_impl(self, substructs, ids=False):
+        substruct_ids = substructs if ids else [struct.id for struct in substructs]
+        matching_structs = self.get_from_index(substruct_ids)
+        
+        for struct in matching_structs:
             # If all substruct IDs are matching
-            if struct_ids == substruct_ids:
+            if struct.get_substructs() == substruct_ids:
                 return struct.copy()
+            
         return None
     
     # Get the id of a struct by data
@@ -322,7 +359,7 @@ class StructDatabase:
                 return struct.id
         return None
     
-    # Gets the data of a struct by struct
+    # Gets the data of a struct by its substructs
     def get_data(self, struct):
         if struct.type == STYPE.DATA:
             return struct.values
@@ -410,7 +447,7 @@ class DBCMD(IntFlag):
     GET_STRUCT_BY_DATA = 1 << 3
     GET_STRUCT_BY_SUBSTRUCTS = 1 << 4
     GET_STRUCTS_BY_LENGTH = 1 << 5
-    GET_SUB_IDS = 1 << 6
+    GET_SUBSTRUCT_IDS = 1 << 6
     GET_STRUCTS = 1 << 7
     GET_BLUEPRINT_BYTES = 1 << 8
     
@@ -456,7 +493,7 @@ class Database():
         DBCMD.GET_STRUCT_BY_DATA:(1, [object]),
         DBCMD.GET_STRUCT_BY_SUBSTRUCTS:(2, [object, bool]),
         DBCMD.GET_STRUCTS_BY_LENGTH:(1, [int]),
-        DBCMD.GET_SUB_IDS: (1, [int]),
+        DBCMD.GET_SUBSTRUCT_IDS: (1, [int]),
         DBCMD.GET_STRUCTS: (0, []),
         DBCMD.GET_BLUEPRINT_BYTES: (1, [object]),
         DBCMD.SET_DATA: (2, [int, object]),
@@ -489,15 +526,15 @@ class Database():
         return self.struct_db.get_struct(data)
     
     # Retrieve struct by substructs
-    def __getStructBySubstructs__(self, substructs, ids):
+    def __getStructBySubstructs__(self, substructs, ids=False):
         return self.struct_db.get_substructs_owner(substructs, ids)
 
     # Retrieve structs by value length
     def __getStructsByLength__(self, length):
         return self.struct_db.get_structs_length(length)
 
-    # Retrieve substruct IDs in given struct
-    def __getSubIDs__(self, id):
+    # Retrieve substruct IDs from given struct
+    def __getSubstructIDs__(self, id):
         return self.struct_db.structs[id].substructs
     
     # Returns the byte data of the struct referenced by ID in a blueprint
@@ -518,13 +555,29 @@ class Database():
     def __setStruct__(self, id, struct):
         self.struct_db.structs[id] = struct
     
-    # Adds a struct to the database
+    # Adds a new struct to the database and sets its ID
+    # Returns an existing struct or the new struct
     def __addStruct__(self, struct):
-        if not self.__getStructByID__(struct.id):
-            self.struct_db.structs.append(struct)
+        if len(struct.substructs) > 0:
+            # Check if data belongs to existing struct
+            existing = self.struct_db.get_substructs_owner(struct.get_substructs(), ids=True)
+            if existing:
+                return existing
+        
+        struct.id = self.__getNewID__(append=False)
+        self.struct_db.structs.append(struct)
+        self.struct_db.add_to_index(struct)
+        return struct
     
     # Saves the Struct Database file
     def __saveDB__(self):
+        # Sort structs in the database by length and modify their ids accordingly
+        sorted_structs = sorted(self.struct_db.structs, key=lambda x: len(x.get_values()))
+        for i, struct in enumerate(sorted_structs):
+            struct.id = i
+        self.struct_db.structs = sorted_structs
+        
+        # Save to files
         database_file, ptrs_file = self.struct_db.to_sdb()
         write_bytes(self.sdb_path, database_file)
         print("Saved Database to file:", self.sdb_path)
@@ -561,8 +614,8 @@ class Database():
             return self.__getStructBySubstructs__(args[0], args[1])
         elif cmd == DBCMD.GET_STRUCTS_BY_LENGTH:
             return self.__getStructsByLength__(args[0])
-        elif cmd == DBCMD.GET_SUB_IDS:
-            return self.__getSubIDs__(args[0])
+        elif cmd == DBCMD.GET_SUBSTRUCT_IDS:
+            return self.__getSubstructIDs__(args[0])
         elif cmd == DBCMD.GET_STRUCTS:
             return self.struct_db.structs
         elif cmd == DBCMD.GET_BLUEPRINT_BYTES:

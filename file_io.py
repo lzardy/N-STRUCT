@@ -3,6 +3,7 @@ from error_handler import handle_errors
 
 BYTE_BITS = 8
 
+# TODO: Multithreaded file IO
 @handle_errors
 def read_bits(file_path):
     data = []

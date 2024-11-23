@@ -31,6 +31,9 @@ class Manager:
                 for filename in os.listdir(folder_path):
                     file_path = os.path.join(folder_path, filename)
                     if os.path.isfile(file_path):
+                        # Skip database and blueprint files
+                        if file_path.lower().endswith(('.sbp', '.sdb', '.sdbp')):
+                            continue
                         self.process_file(file_path, data_dir)
             elif os.path.isfile(input_path):
                 self.process_file(input_path, data_dir)
@@ -75,6 +78,7 @@ class Manager:
             return
         
         file_data = read_bits(file_path)
+        print(f"Cataloguing file {file_path}...")
         blueprint = self.catalog.try_catalog(file_data)
         
         if not blueprint:
@@ -87,8 +91,8 @@ class Manager:
         print(f"Catalogued file {file_path} in: {int(cataloging_duration)} seconds.")
         
         # Save blueprint to file
-        print(f"Saving blueprint to: {os.path.join(data_dir, file_name)}")
         write_bytes(os.path.join(data_dir, file_name), blueprint)
+        print(f"Saved blueprint to: {os.path.join(data_dir, file_name)}")
 
     def is_blueprint(self, bytes):
         """
